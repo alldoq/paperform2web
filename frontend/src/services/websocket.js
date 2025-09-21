@@ -13,8 +13,11 @@ class WebSocketService {
     }
 
     return new Promise((resolve, reject) => {
-      // Create socket connection
-      this.socket = new Socket('/socket', {
+      // Create socket connection - point to backend server
+      const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:4000/socket'
+      console.log('🔌 Connecting to WebSocket at:', wsUrl)
+
+      this.socket = new Socket(wsUrl, {
         params: {},
         reconnectAfterMs: (tries) => [1000, 5000, 10000][tries - 1] || 10000
       })
@@ -81,7 +84,7 @@ class WebSocketService {
 
     // Listen for document updates
     channel.on('document_updated', (payload) => {
-      console.log('Document updated:', payload)
+      console.log('🔄 WebSocket received document_updated:', payload)
       if (callbacks.onDocumentUpdate) {
         callbacks.onDocumentUpdate(payload)
       }
@@ -89,7 +92,7 @@ class WebSocketService {
 
     // Listen for status updates
     channel.on('status_updated', (payload) => {
-      console.log('Document status updated:', payload)
+      console.log('🔄 WebSocket received status_updated:', payload)
       if (callbacks.onStatusUpdate) {
         callbacks.onStatusUpdate(payload)
       }

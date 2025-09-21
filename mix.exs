@@ -49,7 +49,8 @@ defmodule Paperform2web.MixProject do
       {:httpoison, "~> 2.0"},
       {:multipart, "~> 0.4"},
       {:temp, "~> 0.4"},
-      {:porcelain, "~> 2.0"}
+      {:porcelain, "~> 2.0"},
+      {:cors_plug, "~> 3.0"}
     ]
   end
 

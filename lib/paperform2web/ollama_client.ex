@@ -482,12 +482,13 @@ defmodule Paperform2web.OllamaClient do
     content = get_in(response, ["choices", Access.at(0), "message", "content"])
     
     if content do
-      # Strip markdown code block formatting if present
+      # Strip markdown code block formatting (aggressive approach)
       json_content = content
         |> String.trim()
-        |> String.replace(~r/^```json\s*/, "")
-        |> String.replace(~r/\s*```$/, "")
-        |> String.trim()
+        |> strip_markdown_blocks()
+
+      # Log the first 200 chars for debugging if needed
+      Logger.debug("Cleaned JSON content (first 200 chars): #{String.slice(json_content, 0, 200)}...")
 
       case Jason.decode(json_content) do
         {:ok, parsed_json} ->
@@ -583,5 +584,37 @@ defmodule Paperform2web.OllamaClient do
 
   defp ollama_url do
     Application.get_env(:paperform2web, :ollama_url, @default_url)
+  end
+
+  # Aggressively strip markdown code blocks
+  defp strip_markdown_blocks(content) do
+    content
+    # First, try to find content between code blocks and extract just that
+    |> extract_json_from_markdown()
+    # If that doesn't work, try line-by-line cleaning
+    |> clean_line_by_line()
+    |> String.trim()
+  end
+
+  defp extract_json_from_markdown(content) do
+    # Try to find JSON content between ```json and ``` markers
+    case Regex.run(~r/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/mi, content, capture: :all_but_first) do
+      [json_part] -> String.trim(json_part)
+      _ -> content
+    end
+  end
+
+  defp clean_line_by_line(content) do
+    content
+    |> String.split("\n")
+    |> Enum.reject(fn line ->
+      line_trimmed = String.trim(line)
+      # Remove lines that are just markdown markers
+      line_trimmed == "```" or
+      line_trimmed == "```json" or
+      line_trimmed == "```JSON" or
+      String.starts_with?(line_trimmed, "```")
+    end)
+    |> Enum.join("\n")
   end
 end

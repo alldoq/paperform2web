@@ -2,6 +2,7 @@ defmodule Paperform2webWeb.DocumentChannel do
   use Paperform2webWeb, :channel
 
   alias Paperform2web.Documents
+  require Logger
 
   @impl true
   def join("document:" <> document_id, payload, socket) do
@@ -56,10 +57,13 @@ defmodule Paperform2webWeb.DocumentChannel do
 
   # Broadcast document updates to all subscribers
   def broadcast_document_update(document_id, document) do
+    formatted_doc = format_document(document)
+    Logger.info("📡 Broadcasting document update for #{document_id}: status=#{formatted_doc.status}, progress=#{formatted_doc.progress}, message=#{formatted_doc.status_message}")
+
     Paperform2webWeb.Endpoint.broadcast(
       "document:#{document_id}",
       "document_updated",
-      format_document(document)
+      formatted_doc
     )
   end
 
@@ -91,6 +95,7 @@ defmodule Paperform2webWeb.DocumentChannel do
       status: document.status,
       progress: document.progress || 0,
       error_message: document.error_message,
+      status_message: document.status_message,
       model_used: document.model_used,
       theme: document.theme,
       inserted_at: document.inserted_at,

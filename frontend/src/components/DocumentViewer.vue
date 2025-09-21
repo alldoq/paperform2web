@@ -31,69 +31,10 @@
       <div class="flex-1 overflow-hidden bg-gradient-to-br from-gray-50 via-blue-50/30 to-gray-100">
         <div v-if="document.status === 'completed'" class="h-full p-8 overflow-auto">
           <div class="max-w-6xl mx-auto">
-            <!-- PDF Page Navigation -->
-            <div v-if="isPdfDocument" class="mb-6 bg-white rounded-lg p-4 shadow-sm border">
-              <div class="flex items-center justify-between mb-4">
-                <h3 class="font-semibold text-gray-800">📄 PDF Pages ({{ totalPages }} pages)</h3>
-                <div class="text-sm text-gray-600">
-                  Page {{ currentPage }} of {{ totalPages }}
-                </div>
-              </div>
-
-              <!-- Page Navigation -->
-              <div class="flex items-center justify-center space-x-2">
-                <button
-                  @click="previousPage"
-                  :disabled="currentPage <= 1"
-                  class="px-3 py-1 rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  ← Previous
-                </button>
-
-                <!-- Page Thumbnails -->
-                <div class="flex space-x-1 max-w-md overflow-x-auto">
-                  <button
-                    v-for="page in totalPages"
-                    :key="page"
-                    @click="goToPage(page)"
-                    :class="[
-                      'px-2 py-1 rounded text-xs font-medium transition-colors',
-                      currentPage === page
-                        ? 'bg-primary-500 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    ]"
-                  >
-                    {{ page }}
-                  </button>
-                </div>
-
-                <button
-                  @click="nextPage"
-                  :disabled="currentPage >= totalPages"
-                  class="px-3 py-1 rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Next →
-                </button>
-              </div>
-
-              <!-- Current Page Info -->
-              <div v-if="currentPageData" class="mt-4 p-3 bg-gray-50 rounded-lg">
-                <div class="text-sm text-gray-600 mb-2">
-                  <strong>Page {{ currentPage }} Content:</strong>
-                </div>
-                <div class="text-xs text-gray-500">
-                  Document Type: {{ currentPageData.document_type || 'Unknown' }}
-                  <span v-if="currentPageData.content && currentPageData.content.sections">
-                    • Sections: {{ currentPageData.content.sections.length }}
-                  </span>
-                </div>
-              </div>
-            </div>
 
             <!-- Header Section -->
             <div class="text-center mb-8">
-              <span v-if="isPdfDocument">Choose a template for your PDF form (Page {{ currentPage }}):</span>
-              <span v-else>Choose a template for your form:</span>
+Choose a template for your form:
             </div>
 
             <!-- Template Grid -->
@@ -181,6 +122,8 @@
             ✏️ Edit
           </button>
         </div>
+
+
         <button
           @click="$emit('close')"
           class="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-gray-500 text-white hover:bg-gray-600"
@@ -216,11 +159,6 @@ export default {
     const selectedTheme = ref(props.document.theme || 'default')
     const isUpdatingTheme = ref(false)
 
-    // PDF page navigation
-    const currentPage = ref(1)
-    const isPdfDocument = ref(false)
-    const totalPages = ref(1)
-    const currentPageData = ref(null)
 
     const templateOptions = ref([
       {
@@ -306,50 +244,10 @@ export default {
       }, 500)
     }
 
-    // Initialize PDF data when document changes
-    const initializePdfData = () => {
-      if (props.document?.processed_data) {
-        const data = props.document.processed_data
-        if (data.document_type === 'pdf_multipage' && data.pages) {
-          isPdfDocument.value = true
-          totalPages.value = data.pages.length
-          currentPage.value = 1
-          currentPageData.value = data.pages[0]
-        } else {
-          isPdfDocument.value = false
-          totalPages.value = 1
-          currentPage.value = 1
-          currentPageData.value = null
-        }
-      }
-    }
 
-    // PDF navigation functions
-    const goToPage = (page) => {
-      if (page >= 1 && page <= totalPages.value) {
-        currentPage.value = page
-        if (props.document?.processed_data?.pages) {
-          currentPageData.value = props.document.processed_data.pages[page - 1]
-        }
-      }
-    }
-
-    const nextPage = () => {
-      if (currentPage.value < totalPages.value) {
-        goToPage(currentPage.value + 1)
-      }
-    }
-
-    const previousPage = () => {
-      if (currentPage.value > 1) {
-        goToPage(currentPage.value - 1)
-      }
-    }
-
-    // Watch for document changes to update selected theme and PDF data
+    // Watch for document changes to update selected theme
     watch(() => props.document, () => {
       selectedTheme.value = props.document?.theme || 'default'
-      initializePdfData()
     }, { immediate: true })
 
     watch(() => props.document.theme, (newTheme) => {
@@ -424,15 +322,7 @@ export default {
       openEditableHTMLInNewTab,
       updateTheme,
       getTemplateName,
-      selectTemplate,
-      // PDF navigation
-      currentPage,
-      isPdfDocument,
-      totalPages,
-      currentPageData,
-      goToPage,
-      nextPage,
-      previousPage
+      selectTemplate
     }
   }
 }

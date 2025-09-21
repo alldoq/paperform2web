@@ -52,5 +52,13 @@ defmodule Paperform2webWeb.Endpoint do
   plug Plug.MethodOverride
   plug Plug.Head
   plug Plug.Session, @session_options
+
+  # CORS configuration
+  plug CORSPlug,
+    origin: ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
+    credentials: false,
+    max_age: 86400,
+    headers: ["Content-Type", "Authorization", "X-Requested-With"]
+
   plug Paperform2webWeb.Router
 end

@@ -63,13 +63,18 @@
           </div>
         </div>
 
-        <div v-if="currentProcessingDocument && !viewingDocument" class="card">
+        <div v-if="processingDocuments.length > 0 && !viewingDocument" class="card">
           <div class="card-header">
             <h2 class="card-title">Document Processing</h2>
+            <p v-if="processingDocuments.length > 1" class="text-gray-600 text-sm mt-1">
+              Processing {{ processingDocuments.length }} documents
+            </p>
           </div>
-          <div class="p-6">
+          <div class="p-6 space-y-4">
             <ProcessingStatus
-              :document="currentProcessingDocument"
+              v-for="document in processingDocuments"
+              :key="document.id"
+              :document="document"
               @status-update="onStatusUpdate"
               @document-deleted="onDocumentDeleted"
             />
@@ -106,7 +111,7 @@
 </template>
 
 <script>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import FileUpload from './components/FileUpload.vue'
 import ProcessingStatus from './components/ProcessingStatus.vue'
 import DocumentList from './components/DocumentList.vue'
@@ -122,13 +127,23 @@ export default {
     DocumentViewer
   },
   setup() {
-    const currentProcessingDocument = ref(null)
+    const processingDocuments = ref([])
     const completedDocuments = ref([])
     const viewingDocument = ref(null)
     const currentPage = ref('home')
 
+    // Computed property to get the most recent processing document
+    const currentProcessingDocument = computed(() => {
+      if (processingDocuments.value.length === 0) return null
+      // Return the most recently uploaded processing document
+      return processingDocuments.value.reduce((latest, doc) => {
+        return new Date(doc.inserted_at) > new Date(latest.inserted_at) ? doc : latest
+      })
+    })
+
     const onUploadComplete = (document) => {
-      currentProcessingDocument.value = document
+      // Add to processing documents list
+      processingDocuments.value.unshift(document)
     }
 
     const onStatusUpdate = (document) => {
@@ -136,20 +151,26 @@ export default {
         // Move to completed documents
         completedDocuments.value.unshift(document)
 
-        // Clear current processing document
-        currentProcessingDocument.value = null
+        // Remove from processing documents
+        processingDocuments.value = processingDocuments.value.filter(doc => doc.id !== document.id)
 
         // Automatically open document viewer for template selection
         viewingDocument.value = document
       } else if (document.status === 'failed') {
-        // Update the processing document with error status
-        if (currentProcessingDocument.value && currentProcessingDocument.value.id === document.id) {
-          currentProcessingDocument.value = document
+        // Update or add to processing documents with error status
+        const existingIndex = processingDocuments.value.findIndex(doc => doc.id === document.id)
+        if (existingIndex !== -1) {
+          processingDocuments.value[existingIndex] = document
+        } else {
+          processingDocuments.value.unshift(document)
         }
       } else {
-        // Update current processing document
-        if (currentProcessingDocument.value && currentProcessingDocument.value.id === document.id) {
-          currentProcessingDocument.value = document
+        // Update or add to processing documents
+        const existingIndex = processingDocuments.value.findIndex(doc => doc.id === document.id)
+        if (existingIndex !== -1) {
+          processingDocuments.value[existingIndex] = document
+        } else {
+          processingDocuments.value.unshift(document)
         }
       }
     }
@@ -177,10 +198,8 @@ export default {
       // Remove from completed documents list
       completedDocuments.value = completedDocuments.value.filter(doc => doc.id !== deletedDocument.id)
 
-      // Clear current processing document if it's the deleted one
-      if (currentProcessingDocument.value && currentProcessingDocument.value.id === deletedDocument.id) {
-        currentProcessingDocument.value = null
-      }
+      // Remove from processing documents list
+      processingDocuments.value = processingDocuments.value.filter(doc => doc.id !== deletedDocument.id)
 
       // Close viewer if the deleted document was being viewed
       if (viewingDocument.value && viewingDocument.value.id === deletedDocument.id) {
@@ -193,23 +212,23 @@ export default {
         const response = await documentsApi.getDocuments()
         const documents = response.data.data
 
-        // Load completed documents and find the most recent processing document
-        let mostRecentProcessing = null
+        // Clear existing arrays
+        completedDocuments.value = []
+        processingDocuments.value = []
+
+        // Separate documents by status
         documents.forEach(doc => {
           if (doc.status === 'completed') {
             completedDocuments.value.push(doc)
           } else if (doc.status === 'processing' || doc.status === 'uploaded' || doc.status === 'failed') {
-            // Keep only the most recent processing document
-            if (!mostRecentProcessing || new Date(doc.inserted_at) > new Date(mostRecentProcessing.inserted_at)) {
-              mostRecentProcessing = doc
-            }
+            processingDocuments.value.push(doc)
           }
         })
 
-        // Set the most recent processing document as current
-        if (mostRecentProcessing) {
-          currentProcessingDocument.value = mostRecentProcessing
-        }
+        // Sort processing documents by insertion time (newest first)
+        processingDocuments.value.sort((a, b) => new Date(b.inserted_at) - new Date(a.inserted_at))
+
+        console.log(`Loaded ${processingDocuments.value.length} processing documents and ${completedDocuments.value.length} completed documents`)
       } catch (error) {
         console.error('Failed to load documents:', error)
       }
@@ -220,6 +239,7 @@ export default {
     })
 
     return {
+      processingDocuments,
       currentProcessingDocument,
       completedDocuments,
       viewingDocument,

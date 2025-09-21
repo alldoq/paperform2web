@@ -9,6 +9,7 @@ defmodule Paperform2web.Documents do
   alias Paperform2web.DocumentProcessor
   alias Paperform2web.HtmlGenerator
   alias Paperform2web.Templates
+  require Logger
 
   @doc """
   Returns the list of documents.
@@ -71,15 +72,25 @@ defmodule Paperform2web.Documents do
   @doc """
   Updates a document status and progress.
   """
-  def update_document_status(document_id, status, progress, error_message \\ nil) do
+  def update_document_status(document_id, status, progress, status_message \\ nil) do
     document = get_document!(document_id)
     attrs = %{status: status, progress: progress}
-    attrs = if error_message, do: Map.put(attrs, :error_message, error_message), else: attrs
+    attrs = if status_message, do: Map.put(attrs, :status_message, status_message), else: attrs
 
+    # Always update the document, but only broadcast on meaningful changes
     case update_document(document, attrs) do
       {:ok, updated_document} ->
-        # Broadcast status update via WebSocket
-        broadcast_document_update(updated_document)
+        # Only broadcast if there's a meaningful change
+        should_broadcast = document.status != status ||
+                          abs((document.progress || 0) - progress) >= 5 || # Broadcast every 5% progress for page updates
+                          document.status_message != status_message || # Always broadcast status message changes
+                          status in ["completed", "failed"] # Always broadcast completion states
+
+        Logger.info("📊 Document update check for #{document_id}: old_status=#{document.status}, new_status=#{status}, old_progress=#{document.progress}, new_progress=#{progress}, old_message=#{document.status_message}, new_message=#{status_message}, should_broadcast=#{should_broadcast}")
+
+        if should_broadcast do
+          broadcast_document_update(updated_document)
+        end
         {:ok, updated_document}
       error ->
         error
@@ -140,8 +151,21 @@ defmodule Paperform2web.Documents do
   Updates a document's form structure and regenerates processed data.
   """
   def update_form_structure(%Document{} = document, form_fields) do
+    # Debug logging
+    IO.puts("=== UPDATE_FORM_STRUCTURE DEBUG ===")
+    IO.puts("Form fields received: #{inspect(form_fields)}")
+
+    # Get existing sections
+    existing_sections = get_in(document.processed_data, ["content", "sections"]) || []
+    IO.puts("Existing sections count: #{length(existing_sections)}")
+
     # Convert form fields to document sections format
-    sections = Enum.with_index(form_fields, fn field, index ->
+    # First, ensure all field IDs are unique
+    unique_form_fields = ensure_unique_field_ids(form_fields)
+
+    IO.puts("🔧 BACKEND DEBUG: Final unique field IDs: #{Enum.map(unique_form_fields, &(&1["id"])) |> inspect()}")
+
+    new_form_sections = Enum.with_index(unique_form_fields, fn field, index ->
       %{
         "type" => determine_section_type(field["fieldType"]),
         "content" => field["label"],
@@ -153,33 +177,79 @@ defmodule Paperform2web.Documents do
           "italic" => false,
           "width" => field["width"] || "full"
         },
-        "position" => %{"x" => 0, "y" => index * 50, "width" => 400, "height" => 30}
+        "position" => %{"x" => 0, "y" => index * 50, "width" => 400, "height" => 30},
+        "form_field_id" => field["id"]  # Mark as user-added form field
       }
     end)
 
-    # Update processed_data with new form structure
+    IO.puts("🔧 NEW FORM SECTIONS CREATED:")
+    Enum.each(new_form_sections, fn section ->
+      IO.puts("  Section type: #{section["type"]}, form_field_id: #{section["form_field_id"]}")
+    end)
+
+    # Keep only non-form-field sections (original AI-processed content)
+    preserved_sections = Enum.filter(existing_sections, fn section ->
+      !Map.has_key?(section, "form_field_id")
+    end)
+    IO.puts("Preserved sections count: #{length(preserved_sections)}")
+    IO.puts("New form sections count: #{length(new_form_sections)}")
+
+    # Combine preserved sections with new form sections
+    combined_sections = preserved_sections ++ new_form_sections
+    IO.puts("Combined sections count: #{length(combined_sections)}")
+    IO.puts("=== END DEBUG ===")
+
+    # Print a sample of new form sections for debugging
+    if length(new_form_sections) > 0 do
+      IO.puts("Sample new form section: #{inspect(Enum.at(new_form_sections, 0))}")
+    end
+
+    # Update processed_data with merged sections
+    # For PDF documents, also update the first page's sections
     updated_processed_data = Map.merge(
       document.processed_data || %{},
       %{
         "content" => %{
-          "sections" => sections
+          "sections" => combined_sections
         },
         "metadata" => Map.merge(
           get_in(document.processed_data, ["metadata"]) || %{},
           %{
             "last_form_update" => DateTime.utc_now() |> DateTime.to_iso8601(),
-            "form_fields_count" => length(form_fields)
+            "form_fields_count" => length(form_fields),
+            "total_sections_count" => length(combined_sections)
           }
         )
       }
     )
 
-    update_document(document, %{processed_data: updated_processed_data})
+    # For PDF multipage documents, also update the first page's sections
+    final_processed_data = if updated_processed_data["document_type"] == "pdf_multipage" and
+                             updated_processed_data["pages"] do
+      pages = updated_processed_data["pages"]
+      updated_first_page = if length(pages) > 0 do
+        first_page = Enum.at(pages, 0)
+        Map.put(first_page, "content", %{"sections" => combined_sections})
+      end
+
+      updated_pages = if updated_first_page do
+        List.replace_at(pages, 0, updated_first_page)
+      else
+        pages
+      end
+
+      Map.put(updated_processed_data, "pages", updated_pages)
+    else
+      updated_processed_data
+    end
+
+    update_document(document, %{processed_data: final_processed_data})
   end
 
   defp determine_section_type(field_type) do
     case field_type do
       "checkbox" -> "checkbox"
+      "radio" -> "radio"
       "select" -> "select"
       "textarea" -> "textarea"
       "email" -> "email"
@@ -190,13 +260,15 @@ defmodule Paperform2web.Documents do
 
   defp build_field_metadata(field) do
     base_metadata = %{}
-    
+
     case field["fieldType"] do
-      "select" -> 
+      "select" ->
+        Map.put(base_metadata, "options", field["options"] || ["Option 1", "Option 2", "Option 3"])
+      "radio" ->
         Map.put(base_metadata, "options", field["options"] || ["Option 1", "Option 2", "Option 3"])
       "checkbox" ->
         Map.put(base_metadata, "checked", false)
-      _ -> 
+      _ ->
         base_metadata
     end
   end
@@ -297,6 +369,40 @@ defmodule Paperform2web.Documents do
       ".tif" -> "image/tiff"
       ".pdf" -> "application/pdf"
       _ -> "application/octet-stream"
+    end
+  end
+
+  defp ensure_unique_field_ids(form_fields) do
+    {result, _} = Enum.reduce(form_fields, {[], MapSet.new()}, fn field, {acc_fields, used_ids} ->
+      original_id = field["id"]
+      unique_id = find_unique_id(original_id, used_ids)
+
+      if original_id != unique_id do
+        IO.puts("🔧 BACKEND DEBUG: Changed duplicate ID '#{original_id}' to '#{unique_id}'")
+      end
+
+      updated_field = Map.put(field, "id", unique_id)
+      {[updated_field | acc_fields], MapSet.put(used_ids, unique_id)}
+    end)
+
+    Enum.reverse(result)
+  end
+
+  defp find_unique_id(original_id, used_ids) do
+    find_unique_id(original_id, used_ids, 0)
+  end
+
+  defp find_unique_id(original_id, used_ids, counter) do
+    candidate_id = if counter == 0 do
+      original_id
+    else
+      "#{original_id}_#{counter}"
+    end
+
+    if MapSet.member?(used_ids, candidate_id) do
+      find_unique_id(original_id, used_ids, counter + 1)
+    else
+      candidate_id
     end
   end
 

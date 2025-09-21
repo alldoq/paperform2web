@@ -82,14 +82,26 @@ defmodule Paperform2web.PdfProcessor do
     ]) do
       %{status: 0} ->
         # Collect all generated page files
-        page_paths = collect_page_files(output_dir, page_count)
-        {:ok, page_paths}
+        case collect_page_files(output_dir, page_count) do
+          {:ok, page_paths} -> {:ok, page_paths}
+          {:error, reason} -> {:error, reason}
+        end
       %{err: error, status: _} ->
         {:error, "Failed to convert PDF to images: #{error}"}
     end
   end
 
   defp collect_page_files(output_dir, page_count) do
+    Logger.info("Collecting page files from #{output_dir} for #{page_count} pages")
+
+    # List all files in the output directory for debugging
+    case File.ls(output_dir) do
+      {:ok, files} ->
+        Logger.info("Files found in output directory: #{inspect(files)}")
+      {:error, reason} ->
+        Logger.warning("Could not list output directory: #{reason}")
+    end
+
     1..page_count
     |> Enum.map(fn page_num ->
       # pdftoppm creates files with format: page-001.png, page-002.png, etc.
@@ -104,7 +116,28 @@ defmodule Paperform2web.PdfProcessor do
             filename: page_file
           }}
         false ->
-          {:error, "Generated page file not found: #{page_path}"}
+          # Check for alternative file naming formats that pdftoppm might use
+          alternative_formats = [
+            "page-#{page_num}.png",
+            "page#{String.pad_leading(Integer.to_string(page_num), 2, "0")}.png",
+            "page#{page_num}.png"
+          ]
+
+          alternative_path = Enum.find_value(alternative_formats, fn alt_file ->
+            alt_path = Path.join(output_dir, alt_file)
+            if File.exists?(alt_path), do: alt_path, else: nil
+          end)
+
+          case alternative_path do
+            nil ->
+              {:error, "Generated page file not found: #{page_path} (also checked alternative formats)"}
+            path ->
+              {:ok, %{
+                page_number: page_num,
+                file_path: path,
+                filename: Path.basename(path)
+              }}
+          end
       end
     end)
     |> Enum.reduce_while({:ok, []}, fn
@@ -112,7 +145,7 @@ defmodule Paperform2web.PdfProcessor do
       {:error, reason}, _ -> {:halt, {:error, reason}}
     end)
     |> case do
-      {:ok, pages} -> Enum.reverse(pages)
+      {:ok, pages} -> {:ok, Enum.reverse(pages)}
       error -> error
     end
   end

@@ -29,17 +29,26 @@ defmodule Paperform2web.HtmlGenerator do
     theme = Map.get(options, :theme, "default")
     editing_mode = Map.get(options, :editing, false)
     document_id = Map.get(options, :document_id)
-    
+
     # Use template CSS if available, otherwise fallback to theme
     css_content = if template && template.css_content do
       template.css_content
     else
       generate_css(theme)
     end
-    
+
     # Add toolbar CSS for both editing and preview modes since both use toolbars
     editing_css = generate_editing_css()
-    
+
+    # Check if this is a multi-page PDF document
+    is_pdf_multipage = data["document_type"] == "pdf_multipage" and data["pages"]
+
+    content_html = if is_pdf_multipage do
+      generate_pdf_paginated_content(data, editing_mode)
+    else
+      generate_content(data["content"], editing_mode)
+    end
+
     """
     <!DOCTYPE html>
     <html lang="#{get_language(data)}">
@@ -49,15 +58,17 @@ defmodule Paperform2web.HtmlGenerator do
         <title>#{escape_html(title)}</title>
         #{css_content}
         #{editing_css}
+        #{if is_pdf_multipage, do: generate_pagination_css(), else: ""}
     </head>
-    <body class="document-#{data["document_type"]}#{if editing_mode, do: " editing-mode", else: " preview-mode"}">
+    <body class="document-#{data["document_type"]}#{if editing_mode, do: " editing-mode", else: " preview-mode"}#{if is_pdf_multipage, do: " pdf-paginated", else: ""}">
         #{if editing_mode, do: generate_editing_toolbar(document_id), else: generate_preview_toolbar(document_id)}
         <div class="container">
             #{generate_header(data, editing_mode)}
-            #{generate_content(data["content"], editing_mode)}
+            #{content_html}
             #{generate_metadata_section(data["metadata"], options)}
         </div>
         #{generate_javascript(editing_mode, document_id)}
+        #{if is_pdf_multipage, do: generate_pagination_javascript(data["pages"]), else: ""}
     </body>
     </html>
     """
@@ -81,7 +92,10 @@ defmodule Paperform2web.HtmlGenerator do
     end
   end
 
-  defp generate_content(%{"sections" => sections}, editing_mode \\ false) when is_list(sections) do
+  # Function header with default value
+  defp generate_content(content, editing_mode \\ false)
+
+  defp generate_content(%{"sections" => sections}, editing_mode) when is_list(sections) do
     sections_html = if editing_mode do
       # Group sections by field_name for radio buttons to create fieldsets
       grouped_sections = group_radio_sections(sections)
@@ -101,7 +115,7 @@ defmodule Paperform2web.HtmlGenerator do
       |> Enum.with_index()
       |> Enum.map_join("\n", fn {section, index} -> generate_form_section(section, index) end)
     end
-    
+
     """
     <main class="document-content#{if editing_mode, do: " editable-content", else: ""}">
         #{sections_html}
@@ -109,8 +123,192 @@ defmodule Paperform2web.HtmlGenerator do
     </main>
     """
   end
-  
+
   defp generate_content(_, _editing_mode), do: "<main class=\"document-content\"><p>No content available</p></main>"
+
+  # Generate paginated content for PDF documents
+  defp generate_pdf_paginated_content(data, editing_mode) do
+    pages = data["pages"] || []
+    total_pages = length(pages)
+
+    pages_html = pages
+    |> Enum.with_index()
+    |> Enum.map_join("\n", fn {page_data, index} ->
+      page_number = index + 1
+      is_first_page = page_number == 1
+
+      """
+      <div class="pdf-page" id="page-#{page_number}" style="#{if not is_first_page, do: "display: none;", else: ""}">
+        <div class="page-header">
+          <h2 class="page-title">Page #{page_number} of #{total_pages}</h2>
+        </div>
+        #{generate_content(page_data["content"], editing_mode)}
+      </div>
+      """
+    end)
+
+    """
+    <main class="document-content pdf-paginated-content">
+        #{pages_html}
+        <div class="pagination-controls">
+          <button id="prev-page" class="page-btn" onclick="previousPage()" disabled>← Previous</button>
+          <span id="page-info" class="page-info">Page 1 of #{total_pages}</span>
+          <button id="next-page" class="page-btn" onclick="nextPage()">Next →</button>
+        </div>
+    </main>
+    """
+  end
+
+  # Generate CSS for pagination
+  defp generate_pagination_css() do
+    """
+    <style>
+        .pdf-paginated-content {
+            position: relative;
+            min-height: 70vh;
+        }
+
+        .pdf-page {
+            transition: opacity 0.3s ease-in-out;
+        }
+
+        .page-header {
+            border-bottom: 2px solid #e5e7eb;
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+        }
+
+        .page-title {
+            color: #374151;
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .pagination-controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 1rem;
+            margin-top: 3rem;
+            padding: 2rem 0;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .page-btn {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 0.875rem;
+        }
+
+        .page-btn:hover:not(:disabled) {
+            background: #2563eb;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+
+        .page-btn:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .page-info {
+            font-weight: 500;
+            color: #374151;
+            font-size: 0.875rem;
+            min-width: 100px;
+            text-align: center;
+        }
+
+        .pdf-paginated .container {
+            max-width: none;
+            width: 100%;
+        }
+    </style>
+    """
+  end
+
+  # Generate JavaScript for pagination
+  defp generate_pagination_javascript(pages) do
+    total_pages = length(pages)
+
+    """
+    <script>
+        let currentPage = 1;
+        const totalPages = #{total_pages};
+
+        function showPage(pageNumber) {
+            // Hide all pages
+            for (let i = 1; i <= totalPages; i++) {
+                const page = document.getElementById('page-' + i);
+                if (page) {
+                    page.style.display = 'none';
+                }
+            }
+
+            // Show the requested page
+            const targetPage = document.getElementById('page-' + pageNumber);
+            if (targetPage) {
+                targetPage.style.display = 'block';
+            }
+
+            // Update controls
+            updatePaginationControls();
+
+            // Scroll to top
+            window.scrollTo({top: 0, behavior: 'smooth'});
+        }
+
+        function nextPage() {
+            if (currentPage < totalPages) {
+                currentPage++;
+                showPage(currentPage);
+            }
+        }
+
+        function previousPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                showPage(currentPage);
+            }
+        }
+
+        function updatePaginationControls() {
+            const prevBtn = document.getElementById('prev-page');
+            const nextBtn = document.getElementById('next-page');
+            const pageInfo = document.getElementById('page-info');
+
+            if (prevBtn) prevBtn.disabled = currentPage <= 1;
+            if (nextBtn) nextBtn.disabled = currentPage >= totalPages;
+            if (pageInfo) pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
+        }
+
+        // Keyboard navigation
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                e.preventDefault();
+                nextPage();
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                previousPage();
+            }
+        });
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            updatePaginationControls();
+        });
+    </script>
+    """
+  end
 
   # Group radio button sections with the same field_name together
   defp group_radio_sections(sections) do
@@ -706,13 +904,13 @@ defmodule Paperform2web.HtmlGenerator do
     end
   end
 
-  defp generate_metadata_section(metadata, options) do
+  defp generate_metadata_section(metadata, options) when is_map(options) do
     show_metadata = Map.get(options, :show_metadata, false)
-    
+
     if show_metadata do
-      confidence = metadata["confidence"] || 0
-      language = metadata["language"] || "Unknown"
-      notes = metadata["processing_notes"] || ""
+      confidence = if metadata, do: metadata["confidence"] || 0, else: 0
+      language = if metadata, do: metadata["language"] || "Unknown", else: "Unknown"
+      notes = if metadata, do: metadata["processing_notes"] || "", else: ""
       
       """
       <footer class="document-metadata">
@@ -732,6 +930,7 @@ defmodule Paperform2web.HtmlGenerator do
       ""
     end
   end
+
 
   defp build_css_classes(type, formatting) do
     classes = ["section", "section-#{type}"]
@@ -818,8 +1017,47 @@ defmodule Paperform2web.HtmlGenerator do
       "elegant" -> elegant_css()
       _ -> default_css()
     end
-    
-    base_css
+
+    # Add 80% width container rule and radio button styling for all themes
+    full_width_css = """
+    <style>
+        .container {
+            max-width: none !important;
+            width: 80% !important;
+            margin: 0 auto;
+            padding: 1rem;
+        }
+
+        /* Radio button field styling */
+        .radio-field {
+            margin-bottom: 1.5rem;
+        }
+        .radio-group-label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 0.75rem;
+            color: #374151;
+        }
+        .radio-options {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .radio-options label {
+            display: flex;
+            align-items: center;
+            font-weight: normal;
+            cursor: pointer;
+            padding: 0.5rem 0;
+        }
+        .radio-options input[type="radio"] {
+            margin-right: 0.75rem;
+            transform: scale(1.2);
+        }
+    </style>
+    """
+
+    base_css <> full_width_css
   end
   
 
@@ -2303,6 +2541,22 @@ defmodule Paperform2web.HtmlGenerator do
     formatting = section["formatting"] || %{}
     field_name = get_in(section, ["metadata", "field_name"]) || "field_#{index}"
 
+    # Check if this is a user-added field and ensure proper prefix
+    data_index = if Map.has_key?(section, "form_field_id") do
+      form_field_id = section["form_field_id"]
+      # Ensure user fields have the user_field_ prefix for JavaScript detection
+      if String.starts_with?(form_field_id, "user_field_") do
+        form_field_id
+      else
+        "user_field_#{form_field_id}"
+      end
+    else
+      "ai_field_#{index}"  # Use different prefix for AI-processed fields
+    end
+
+    # Debug logging to track data_index generation
+    IO.puts("🔧 HTML Generation Debug: section #{index}, type: #{type}, form_field_id present: #{Map.has_key?(section, "form_field_id")}, data_index: #{data_index}")
+
     # Check if field should be half-width
     width_class = case get_in(formatting, ["width"]) do
       "half" -> " half-width"
@@ -2344,7 +2598,7 @@ defmodule Paperform2web.HtmlGenerator do
     end
 
     """
-    <div class="editable-field-wrapper form-field#{width_class}" data-index="#{index}" data-type="#{type}" draggable="true">
+    <div class="editable-field-wrapper form-field#{width_class}" data-index="#{data_index}" data-type="#{type}" draggable="true">
         <div class="drag-handle"></div>
         <div class="field-controls">
             <button class="control-btn type-btn" title="Change field type">⚙</button>
@@ -2472,6 +2726,28 @@ defmodule Paperform2web.HtmlGenerator do
         """
         <label class="editable-label" contenteditable="true" data-field="#{field_name}">#{escape_html(content)}</label>
         <input type="date" id="#{field_name}" name="#{field_name}" />
+        """
+
+      "radio" ->
+        # Handle radio button with multiple options for user-added fields
+        options = get_in(section, ["metadata", "options"]) || ["Option 1", "Option 2", "Option 3"]
+        radio_buttons = Enum.with_index(options, fn option, idx ->
+          radio_id = "#{field_name}_#{idx}"
+          """
+          <div class="radio-option">
+            <input type="radio" id="#{radio_id}" name="#{field_name}" value="#{escape_html(option)}" />
+            <label class="editable-label" contenteditable="true" data-field="#{field_name}_#{idx}" for="#{radio_id}">#{escape_html(option)}</label>
+          </div>
+          """
+        end) |> Enum.join("")
+
+        """
+        <div class="form-field radio-group">
+          <div class="form-question editable-label" contenteditable="true" data-field="#{field_name}_question">#{escape_html(content)}</div>
+          <div class="radio-options">
+            #{radio_buttons}
+          </div>
+        </div>
         """
 
       _ ->
@@ -2621,12 +2897,40 @@ defmodule Paperform2web.HtmlGenerator do
             if (draggedElement && draggedElement !== e.target) {
                 const container = document.querySelector('.editable-content');
                 const targetField = e.target.closest('.editable-field-wrapper');
-                
+
                 if (targetField && targetField !== draggedElement) {
                     // Insert before the target
                     container.insertBefore(draggedElement, targetField);
+
+                    // Update field positions and indices after reordering
+                    updateFieldPositions();
                     updateFormData();
                 }
+            }
+        }
+
+        function updateFieldPositions() {
+            // Get all user-added fields (those with user_field_ data-index)
+            const userFields = document.querySelectorAll('.editable-field-wrapper[data-index^="user_field_"]');
+
+            userFields.forEach((field, index) => {
+                // Update the position metadata for visual positioning
+                const yPosition = index * 50; // 50px spacing between fields
+                field.style.order = index; // CSS order for flex layouts
+
+                // Update any position-related attributes if needed
+                field.setAttribute('data-position', index);
+            });
+
+            // Show position update feedback
+            const saveStatus = document.getElementById('save-status');
+            if (saveStatus && userFields.length > 1) {
+                saveStatus.textContent = 'Field positions updated';
+                saveStatus.className = 'info';
+                saveStatus.style.opacity = '1';
+                setTimeout(() => {
+                    saveStatus.style.opacity = '0';
+                }, 2000);
             }
         }
         
@@ -2849,7 +3153,7 @@ defmodule Paperform2web.HtmlGenerator do
                             </div>
                             
                             <div class="field-group" id="field-options-group" style="display: none;">
-                                <label>Dropdown Options</label>
+                                <label id="field-options-label">Options</label>
                                 <div class="field-options-container">
                                     <ul id="field-options-list" class="field-options-list"></ul>
                                     <button type="button" class="add-option-btn" onclick="addOption()">+ Add Option</button>
@@ -2905,6 +3209,12 @@ defmodule Paperform2web.HtmlGenerator do
             if (type === 'select') {
                 placeholderGroup.style.display = 'none';
                 optionsGroup.style.display = 'block';
+                document.getElementById('field-options-label').textContent = 'Dropdown Options';
+                populateOptions();
+            } else if (type === 'radio') {
+                placeholderGroup.style.display = 'none';
+                optionsGroup.style.display = 'block';
+                document.getElementById('field-options-label').textContent = 'Radio Button Options';
                 populateOptions();
             } else if (type === 'checkbox') {
                 placeholderGroup.style.display = 'none';
@@ -2944,7 +3254,53 @@ defmodule Paperform2web.HtmlGenerator do
         function removeOption(button) {
             button.parentElement.remove();
         }
-        
+
+        function handleAddFieldTypeChange() {
+            const selectedType = document.querySelector('.field-type-option.selected');
+            const fieldType = selectedType ? selectedType.getAttribute('data-type') : 'text';
+            const optionsGroup = document.getElementById('add-field-options-group');
+
+            // Show/hide options section based on field type
+            if (fieldType === 'radio' || fieldType === 'select') {
+                optionsGroup.style.display = 'block';
+                document.getElementById('add-field-options-label').textContent =
+                    fieldType === 'radio' ? 'Radio Button Options' : 'Dropdown Options';
+                populateAddFieldOptions();
+            } else {
+                optionsGroup.style.display = 'none';
+            }
+        }
+
+        function populateAddFieldOptions() {
+            const optionsList = document.getElementById('add-field-options-list');
+            optionsList.innerHTML = '';
+
+            // Add default options
+            const defaultOptions = ['Option 1', 'Option 2', 'Option 3'];
+            defaultOptions.forEach(option => {
+                addNewFieldOptionToList(option);
+            });
+        }
+
+        function addNewFieldOption() {
+            addNewFieldOptionToList('New Option');
+        }
+
+        function addNewFieldOptionToList(value = '') {
+            const optionsList = document.getElementById('add-field-options-list');
+            const optionItem = document.createElement('li');
+            optionItem.className = 'field-option-item';
+            optionItem.innerHTML = \`
+                <input type="text" class="field-option-input" value="\${value}" placeholder="Option text">
+                <button type="button" class="remove-option-btn" onclick="removeNewFieldOption(this)">×</button>
+            \`;
+            optionsList.appendChild(optionItem);
+        }
+
+        function removeNewFieldOption(button) {
+            button.parentElement.remove();
+        }
+
         function saveFieldChanges(event) {
             event.preventDefault();
             
@@ -3007,6 +3363,28 @@ defmodule Paperform2web.HtmlGenerator do
                         </div>
                     \`;
                     break;
+                case 'radio':
+                    const radioOptions = Array.from(document.querySelectorAll('.field-option-input'))
+                        .map(input => input.value.trim())
+                        .filter(value => value)
+                        .map(option => \`<label><input type="radio" name="\${fieldName}" value="\${option}" /> \${option}</label>\`)
+                        .join('');
+
+                    const defaultRadioOptions = radioOptions || \`
+                        <label><input type="radio" name="\${fieldName}" value="option1" /> Option 1</label>
+                        <label><input type="radio" name="\${fieldName}" value="option2" /> Option 2</label>
+                        <label><input type="radio" name="\${fieldName}" value="option3" /> Option 3</label>
+                    \`;
+
+                    newHTML = \`
+                        <div class="radio-field">
+                            <span class="editable-label radio-group-label" contenteditable="true" data-field="\${fieldName}">\${label}</span>
+                            <div class="radio-options">
+                                \${defaultRadioOptions}
+                            </div>
+                        </div>
+                    \`;
+                    break;
                 case 'select':
                     const options = Array.from(document.querySelectorAll('.field-option-input'))
                         .map(input => input.value.trim())
@@ -3060,6 +3438,28 @@ defmodule Paperform2web.HtmlGenerator do
             window.insertionIndex = null; // Insert at end
             openAddFieldDialog();
         }
+
+        function editField(fieldWrapper) {
+            // Get current field data
+            const dataIndex = fieldWrapper.getAttribute('data-index');
+            const currentType = fieldWrapper.getAttribute('data-type');
+            const labelElement = fieldWrapper.querySelector('.editable-label');
+            const currentLabel = labelElement ? labelElement.textContent.trim() : 'Field';
+            const isHalfWidth = fieldWrapper.classList.contains('half-width');
+
+            // Get current options if it's a select or radio field
+            let currentOptions = [];
+            if (currentType === 'radio' || currentType === 'select') {
+                const optionElements = fieldWrapper.querySelectorAll('option, .radio-option label');
+                currentOptions = Array.from(optionElements).map(opt => opt.textContent.trim()).filter(text => text);
+            }
+
+            // Set up edit mode
+            window.editingFieldWrapper = fieldWrapper;
+            window.editingFieldIndex = dataIndex;
+
+            openEditFieldDialog(currentType, currentLabel, currentOptions, isHalfWidth);
+        }
         
         function createAddFieldModal() {
             const modalHTML = \`
@@ -3103,6 +3503,18 @@ defmodule Paperform2web.HtmlGenerator do
                                     <span class="field-type-icon">☑️</span>
                                     <div class="field-type-name">Checkbox</div>
                                 </div>
+                                <div class="field-type-option" data-type="radio">
+                                    <span class="field-type-icon">🔘</span>
+                                    <div class="field-type-name">Radio Button</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="field-group" id="add-field-options-group" style="display: none;">
+                            <label id="add-field-options-label">Options</label>
+                            <div class="field-options-container">
+                                <ul id="add-field-options-list" class="field-options-list"></ul>
+                                <button type="button" class="add-option-btn" onclick="addNewFieldOption()">+ Add Option</button>
                             </div>
                         </div>
 
@@ -3122,6 +3534,8 @@ defmodule Paperform2web.HtmlGenerator do
                 option.addEventListener('click', function() {
                     document.querySelectorAll('.field-type-option').forEach(opt => opt.classList.remove('selected'));
                     this.classList.add('selected');
+                    // Show/hide options based on selected type
+                    handleAddFieldTypeChange();
                 });
             });
         }
@@ -3155,20 +3569,326 @@ defmodule Paperform2web.HtmlGenerator do
             modal.classList.remove('active');
             window.insertionIndex = null;
         }
+
+        function openEditFieldDialog(currentType, currentLabel, currentOptions, isHalfWidth) {
+            // Create edit modal if it doesn't exist
+            if (!document.getElementById('edit-field-modal')) {
+                createEditFieldModal();
+            }
+
+            const modal = document.getElementById('edit-field-modal');
+
+            // Populate current values
+            document.getElementById('edit-field-label').value = currentLabel;
+
+            // Set current field type
+            document.querySelectorAll('.edit-field-type-option').forEach(option => {
+                option.classList.remove('selected');
+                if (option.dataset.type === currentType) {
+                    option.classList.add('selected');
+                }
+            });
+
+            // Populate options if it's a select or radio field
+            const optionsList = document.getElementById('edit-field-options-list');
+            optionsList.innerHTML = '';
+            if ((currentType === 'radio' || currentType === 'select') && currentOptions.length > 0) {
+                currentOptions.forEach(option => {
+                    addEditFieldOptionToList(option);
+                });
+            }
+
+            // Show/hide options section
+            handleEditFieldTypeChange();
+
+            modal.classList.add('active');
+        }
+
+        function closeEditFieldDialog() {
+            const modal = document.getElementById('edit-field-modal');
+            if (modal) {
+                modal.classList.remove('active');
+            }
+            window.editingFieldWrapper = null;
+            window.editingFieldIndex = null;
+        }
+
+        function createEditFieldModal() {
+            const modalHTML = \`
+                <div id="edit-field-modal" class="field-edit-modal">
+                    <div class="field-edit-dialog">
+                        <div class="add-field-header">
+                            <h3 class="add-field-title">⚙️ Edit Field</h3>
+                            <button class="field-edit-close" onclick="closeEditFieldDialog()">×</button>
+                        </div>
+                        <div class="add-field-content">
+                            <div class="field-group">
+                                <label>Field Label</label>
+                                <input type="text" id="edit-field-label" placeholder="Enter field label" value="">
+                            </div>
+
+                            <div class="field-group">
+                                <label>Choose Field Type</label>
+                                <div class="field-type-grid">
+                                    <div class="field-type-option edit-field-type-option" data-type="text">
+                                        <span class="field-type-icon">📝</span>
+                                        <div class="field-type-name">Text Input</div>
+                                    </div>
+                                    <div class="field-type-option edit-field-type-option" data-type="textarea">
+                                        <span class="field-type-icon">📄</span>
+                                        <div class="field-type-name">Textarea</div>
+                                    </div>
+                                    <div class="field-type-option edit-field-type-option" data-type="email">
+                                        <span class="field-type-icon">📧</span>
+                                        <div class="field-type-name">Email</div>
+                                    </div>
+                                    <div class="field-type-option edit-field-type-option" data-type="date">
+                                        <span class="field-type-icon">📅</span>
+                                        <div class="field-type-name">Date</div>
+                                    </div>
+                                    <div class="field-type-option edit-field-type-option" data-type="select">
+                                        <span class="field-type-icon">📋</span>
+                                        <div class="field-type-name">Dropdown</div>
+                                    </div>
+                                    <div class="field-type-option edit-field-type-option" data-type="checkbox">
+                                        <span class="field-type-icon">☑️</span>
+                                        <div class="field-type-name">Checkbox</div>
+                                    </div>
+                                    <div class="field-type-option edit-field-type-option" data-type="radio">
+                                        <span class="field-type-icon">🔘</span>
+                                        <div class="field-type-name">Radio Button</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="field-group" id="edit-field-options-group" style="display: none;">
+                                <label id="edit-field-options-label">Options</label>
+                                <ul id="edit-field-options-list"></ul>
+                                <button type="button" class="add-option-btn" onclick="addEditFieldOption()">+ Add Option</button>
+                            </div>
+
+
+                            <div class="field-edit-actions">
+                                <button type="button" class="field-edit-btn cancel" onclick="closeEditFieldDialog()">Cancel</button>
+                                <button type="button" class="field-edit-btn save" onclick="updateField()">Update Field</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            \`;
+
+            document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+            // Add click handlers for field type selection
+            document.querySelectorAll('.edit-field-type-option').forEach(option => {
+                option.addEventListener('click', function() {
+                    document.querySelectorAll('.edit-field-type-option').forEach(opt => opt.classList.remove('selected'));
+                    this.classList.add('selected');
+                    handleEditFieldTypeChange();
+                });
+            });
+        }
+
+        function handleEditFieldTypeChange() {
+            const selectedType = document.querySelector('.edit-field-type-option.selected');
+            const optionsGroup = document.getElementById('edit-field-options-group');
+
+            if (selectedType && (selectedType.dataset.type === 'select' || selectedType.dataset.type === 'radio')) {
+                optionsGroup.style.display = 'block';
+                // Add default options if none exist
+                const optionsList = document.getElementById('edit-field-options-list');
+                if (optionsList.children.length === 0) {
+                    const defaultOptions = ['Option 1', 'Option 2', 'Option 3'];
+                    defaultOptions.forEach(option => {
+                        addEditFieldOptionToList(option);
+                    });
+                }
+            } else {
+                optionsGroup.style.display = 'none';
+            }
+        }
+
+        function addEditFieldOption() {
+            addEditFieldOptionToList('New Option');
+        }
+
+        function addEditFieldOptionToList(value = '') {
+            const optionsList = document.getElementById('edit-field-options-list');
+            const optionItem = document.createElement('li');
+            optionItem.className = 'option-item';
+            optionItem.innerHTML = \`
+                <input type="text" class="option-input" value="\${value}" placeholder="Option text">
+                <button class="remove-option" onclick="this.parentElement.remove()">×</button>
+            \`;
+            optionsList.appendChild(optionItem);
+        }
+
+        async function updateField() {
+            const fieldWrapper = window.editingFieldWrapper;
+            if (!fieldWrapper) return;
+
+            const fieldLabel = document.getElementById('edit-field-label').value.trim() || 'Field';
+            const selectedType = document.querySelector('.edit-field-type-option.selected');
+            const fieldType = selectedType ? selectedType.dataset.type : 'text';
+
+            // Get options for select/radio fields
+            let options = [];
+            if (fieldType === 'select' || fieldType === 'radio') {
+                const optionInputs = document.querySelectorAll('#edit-field-options-list .option-input');
+                options = Array.from(optionInputs).map(input => input.value.trim()).filter(val => val);
+            }
+
+            // Update the field's DOM structure
+            updateFieldDOM(fieldWrapper, fieldType, fieldLabel, options);
+
+            // Update formData and save to database
+            console.log('🔧 EDIT DEBUG - Field data-index before update:', fieldWrapper.getAttribute('data-index'));
+            console.log('🔧 EDIT DEBUG - Field classes before update:', fieldWrapper.className);
+            updateFormData();
+            console.log('🔧 EDIT DEBUG - FormData after update:', formData);
+            console.log('🔧 EDIT DEBUG - Found user fields:', document.querySelectorAll('.editable-field-wrapper[data-index^="user_field_"]').length);
+            console.log('🔧 EDIT DEBUG - All editable fields:', document.querySelectorAll('.editable-field-wrapper').length);
+            console.log('🔧 EDIT DEBUG - Field data-index after update:', fieldWrapper.getAttribute('data-index'));
+            console.log('🔧 EDIT DEBUG - Field classes after update:', fieldWrapper.className);
+
+            // Show saving status
+            const saveStatus = document.getElementById('save-status');
+            if (saveStatus) {
+                saveStatus.textContent = 'Saving field changes...';
+                saveStatus.className = '';
+                saveStatus.style.opacity = '1';
+            }
+
+            try {
+                // Save the updated form structure to the database
+                const response = await fetch(`/api/documents/#{document_id}/form_structure`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        form_fields: formData
+                    })
+                });
+
+                if (response.ok) {
+                    closeEditFieldDialog();
+
+                    // Show success message
+                    if (saveStatus) {
+                        saveStatus.textContent = 'Field updated and saved successfully!';
+                        saveStatus.className = 'success';
+                        setTimeout(() => {
+                            saveStatus.style.opacity = '0';
+                        }, 3000);
+                    }
+                } else {
+                    throw new Error('Failed to save field changes');
+                }
+            } catch (error) {
+                console.error('Error saving field changes:', error);
+                if (saveStatus) {
+                    saveStatus.textContent = 'Error saving field changes. Please try again.';
+                    saveStatus.className = 'error';
+                    setTimeout(() => {
+                        saveStatus.style.opacity = '0';
+                    }, 5000);
+                }
+            }
+        }
+
+        function updateFieldDOM(fieldWrapper, fieldType, label, options) {
+            const dataIndex = fieldWrapper.getAttribute('data-index');
+
+            // Update field type
+            fieldWrapper.setAttribute('data-type', fieldType);
+            fieldWrapper.classList.remove('half-width'); // Always full width
+
+            // Generate new field HTML
+            const fieldName = \`field_\${dataIndex}\`;
+            let formElement = '';
+
+            switch (fieldType) {
+                case 'textarea':
+                    formElement = \`
+                        <label class="editable-label" contenteditable="true" data-field="\${fieldName}">\${label}</label>
+                        <textarea id="\${fieldName}" name="\${fieldName}" placeholder="\${label}"></textarea>
+                    \`;
+                    break;
+                case 'select':
+                    const selectOptions = options.length > 0
+                        ? options.map(option => \`<option value="\${option}">\${option}</option>\`).join('')
+                        : \`<option value="option1">Option 1</option><option value="option2">Option 2</option><option value="option3">Option 3</option>\`;
+                    formElement = \`
+                        <label class="editable-label" contenteditable="true" data-field="\${fieldName}">\${label}</label>
+                        <select id="\${fieldName}" name="\${fieldName}">\${selectOptions}</select>
+                    \`;
+                    break;
+                case 'radio':
+                    const radioOptions = options.length > 0 ? options : ['Option 1', 'Option 2', 'Option 3'];
+                    const radioButtons = radioOptions.map((option, i) => \`
+                        <div class="radio-option">
+                            <input type="radio" id="\${fieldName}_\${i}" name="\${fieldName}" value="\${option}">
+                            <label for="\${fieldName}_\${i}">\${option}</label>
+                        </div>
+                    \`).join('');
+                    formElement = \`
+                        <label class="editable-label" contenteditable="true" data-field="\${fieldName}">\${label}</label>
+                        <div class="radio-options">\${radioButtons}</div>
+                    \`;
+                    break;
+                case 'checkbox':
+                    formElement = \`
+                        <div class="checkbox-wrapper">
+                            <input type="checkbox" id="\${fieldName}" name="\${fieldName}">
+                            <label class="editable-label" contenteditable="true" data-field="\${fieldName}" for="\${fieldName}">\${label}</label>
+                        </div>
+                    \`;
+                    break;
+                case 'email':
+                    formElement = \`
+                        <label class="editable-label" contenteditable="true" data-field="\${fieldName}">\${label}</label>
+                        <input type="email" id="\${fieldName}" name="\${fieldName}" placeholder="\${label}">
+                    \`;
+                    break;
+                case 'date':
+                    formElement = \`
+                        <label class="editable-label" contenteditable="true" data-field="\${fieldName}">\${label}</label>
+                        <input type="date" id="\${fieldName}" name="\${fieldName}">
+                    \`;
+                    break;
+                default:
+                    formElement = \`
+                        <label class="editable-label" contenteditable="true" data-field="\${fieldName}">\${label}</label>
+                        <input type="text" id="\${fieldName}" name="\${fieldName}" placeholder="\${label}">
+                    \`;
+            }
+
+            // Replace field content while preserving controls
+            const dragHandle = fieldWrapper.querySelector('.drag-handle');
+            const controls = fieldWrapper.querySelector('.field-controls');
+
+            fieldWrapper.innerHTML = '';
+            if (dragHandle) fieldWrapper.appendChild(dragHandle);
+            if (controls) fieldWrapper.appendChild(controls);
+            fieldWrapper.insertAdjacentHTML('beforeend', formElement);
+
+            // Re-initialize field listeners
+            initializeFieldListeners();
+        }
         
         function createNewField() {
             const fieldLabel = document.getElementById('new-field-label').value.trim() || 'New Field';
             const selectedType = document.querySelector('.field-type-option.selected');
             const fieldType = selectedType ? selectedType.getAttribute('data-type') : 'text';
-            
+
             if (isColumnLayoutActive && window.targetColumn) {
                 // Add field to specific column
                 const columnId = window.targetColumn === 'left' ? 'column-left' : 'column-right';
                 const column = document.getElementById(columnId);
                 const addFieldBtn = column.querySelector('.column-add-field');
-                
-                // Create field for column layout
-                const newIndex = document.querySelectorAll('.column-field').length;
+
+                // Create field for column layout - generate unique ID based on timestamp
+                const newIndex = Date.now();
                 const fieldHTML = generateNewFieldHTML(fieldType, fieldLabel, newIndex);
                 
                 // Convert to column field format
@@ -3188,9 +3908,9 @@ defmodule Paperform2web.HtmlGenerator do
                 window.targetColumn = null;
                 
             } else if (!isColumnLayoutActive) {
-                // Regular field insertion for list mode
-                const insertionPosition = window.insertionIndex !== null ? window.insertionIndex : document.querySelectorAll('.editable-field-wrapper').length;
-                const newFieldHTML = generateNewFieldHTML(fieldType, fieldLabel, insertionPosition);
+                // Regular field insertion for list mode - generate unique ID based on timestamp
+                const newIndex = Date.now();
+                const newFieldHTML = generateNewFieldHTML(fieldType, fieldLabel, newIndex);
                 
                 if (window.insertionIndex !== null) {
                     // Insert at specific position
@@ -3215,6 +3935,8 @@ defmodule Paperform2web.HtmlGenerator do
             document.getElementById('new-field-label').value = '';
             document.querySelectorAll('.field-type-option').forEach(opt => opt.classList.remove('selected'));
             document.querySelector('.field-type-option[data-type="text"]').classList.add('selected');
+            // Hide options section when resetting to text field
+            document.getElementById('add-field-options-group').style.display = 'none';
             
             updateFormData();
             closeAddFieldDialog();
@@ -3297,18 +4019,7 @@ defmodule Paperform2web.HtmlGenerator do
                 if (typeBtn) {
                     typeBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        // TODO: Implement field type editing functionality
-                        console.log('Field type editing not yet implemented');
-
-                        const saveStatus = document.getElementById('save-status');
-                        if (saveStatus) {
-                            saveStatus.textContent = 'Field type editing coming soon!';
-                            saveStatus.className = 'info';
-                            saveStatus.style.opacity = '1';
-                            setTimeout(() => {
-                                saveStatus.style.opacity = '0';
-                            }, 3000);
-                        }
+                        editField(field);
                     });
                 }
                 
@@ -3341,13 +4052,45 @@ defmodule Paperform2web.HtmlGenerator do
                         </div>
                     `;
                     break;
+                case 'radio':
+                    const radioOptions = Array.from(document.querySelectorAll('#add-field-options-list .field-option-input'))
+                        .map(input => input.value.trim())
+                        .filter(value => value)
+                        .map(option => `<label><input type="radio" name="${fieldName}" value="${option}" /> ${option}</label>`)
+                        .join('');
+
+                    const defaultRadioOptions = radioOptions || `
+                        <label><input type="radio" name="${fieldName}" value="option1" /> Option 1</label>
+                        <label><input type="radio" name="${fieldName}" value="option2" /> Option 2</label>
+                        <label><input type="radio" name="${fieldName}" value="option3" /> Option 3</label>
+                    `;
+
+                    formElement = `
+                        <div class="radio-field">
+                            <span class="editable-label radio-group-label" contenteditable="true" data-field="${fieldName}">${label}</span>
+                            <div class="radio-options">
+                                ${defaultRadioOptions}
+                            </div>
+                        </div>
+                    `;
+                    break;
                 case 'select':
+                    const selectOptions = Array.from(document.querySelectorAll('#add-field-options-list .field-option-input'))
+                        .map(input => input.value.trim())
+                        .filter(value => value)
+                        .map(option => `<option value="${option}">${option}</option>`)
+                        .join('');
+
+                    const defaultSelectOptions = selectOptions || `
+                        <option value="option1">Option 1</option>
+                        <option value="option2">Option 2</option>
+                        <option value="option3">Option 3</option>
+                    `;
+
                     formElement = `
                         <label class="editable-label" contenteditable="true" data-field="${fieldName}">${label}</label>
                         <select id="${fieldName}" name="${fieldName}">
-                            <option value="option1">Option 1</option>
-                            <option value="option2">Option 2</option>
-                            <option value="option3">Option 3</option>
+                            ${defaultSelectOptions}
                         </select>
                     `;
                     break;
@@ -3371,7 +4114,7 @@ defmodule Paperform2web.HtmlGenerator do
             }
             
             return `
-                <div class="editable-field-wrapper form-field" data-index="${index}" data-type="${type}" draggable="true">
+                <div class="editable-field-wrapper form-field" data-index="user_field_${index}" data-type="${type}" draggable="true">
                     <div class="drag-handle"></div>
                     <div class="field-controls">
                         <button class="control-btn type-btn" title="Change field type">⚙</button>
@@ -3383,26 +4126,359 @@ defmodule Paperform2web.HtmlGenerator do
         }
         
         function loadFormData() {
-            const fields = document.querySelectorAll('.editable-field-wrapper');
-            formData = Array.from(fields).map((field, index) => ({
-                id: `field_${index}`,
-                label: field.querySelector('.editable-label')?.textContent || 'Field',
-                fieldType: field.getAttribute('data-type'),
-                originalIndex: index,
-                width: field.classList.contains('half-width') ? 'half' : 'full'
-            }));
+            // First try to load user-added fields (those with user_field_ prefix in data-index)
+            let fields = document.querySelectorAll('.editable-field-wrapper[data-index^="user_field_"]');
+
+            // If no user_field_ fields found, check for any fields that might be restored user fields
+            if (fields.length === 0) {
+                // As a fallback, check for any editable fields that are user-added types
+                const allEditableFields = document.querySelectorAll('.editable-field-wrapper');
+
+                const potentialUserFields = Array.from(allEditableFields).filter(field => {
+                    const dataType = field.getAttribute('data-type');
+                    const dataIndex = field.getAttribute('data-index');
+
+                    // Check if this might be a user-added field that was restored incorrectly
+                    const isFormInput = dataType === 'form_input';
+                    const isUserFieldType = dataType === 'text' || dataType === 'textarea' ||
+                                          dataType === 'select' || dataType === 'radio' || dataType === 'checkbox' ||
+                                          dataType === 'radio-group';
+                    const hasAiFieldIndex = dataIndex && dataIndex.startsWith('ai_field_');
+                    const hasNumericIndex = dataIndex && /^\d+$/.test(dataIndex);
+
+                    // If it's a form_input with ai_field_ index, it might be a restored user field
+                    const mightBeRestoredUserField = (isFormInput && hasAiFieldIndex) || isUserFieldType || hasNumericIndex;
+
+                    return mightBeRestoredUserField || isUserFieldType;
+                });
+
+                if (potentialUserFields.length > 0) {
+                    fields = potentialUserFields;
+                }
+            }
+
+            formData = Array.from(fields).map((field, index) => {
+                const fieldType = field.getAttribute('data-type') || inferFieldTypeFromElement(field);
+
+                // Try multiple selectors for the label
+                let label = 'Field';
+                const labelSelectors = [
+                    '.editable-label',
+                    'legend.editable-label',
+                    'fieldset legend',
+                    'label.editable-label',
+                    'span.editable-label',
+                    'div.editable-label',
+                    'label',
+                    'input[type="text"]',
+                    'textarea'
+                ];
+
+                for (const selector of labelSelectors) {
+                    const labelElement = field.querySelector(selector);
+                    if (labelElement && labelElement.textContent && labelElement.textContent.trim()) {
+                        const extractedLabel = labelElement.textContent.trim();
+                        // Skip generic placeholders or empty labels
+                        if (extractedLabel !== 'Field' && extractedLabel !== '' && extractedLabel.length > 0) {
+                            label = extractedLabel;
+                            break;
+                        }
+                    }
+                }
+
+                // If still "Field", try to get a placeholder or name attribute
+                if (label === 'Field') {
+                    const input = field.querySelector('input, textarea');
+                    if (input) {
+                        const placeholder = input.getAttribute('placeholder');
+                        const name = input.getAttribute('name');
+                        if (placeholder && placeholder.trim()) {
+                            label = placeholder.trim();
+                        } else if (name && name.trim()) {
+                            label = name.replace(/_/g, ' ').trim();
+                        }
+                    }
+                }
+
+                const dataIndex = field.getAttribute('data-index');
+                console.log(`Field ${index}: type=${fieldType}, label="${label}", index=${dataIndex}`);
+
+
+                let fieldData = {
+                    id: dataIndex || 'user_field_' + index,
+                    label: label,
+                    fieldType: fieldType,
+                    originalIndex: parseInt(dataIndex?.replace('user_field_', '')) || index,
+                    width: field.classList.contains('half-width') ? 'half' : 'full'
+                };
+
+                // Capture options for radio buttons and dropdowns
+                if (fieldType === 'radio' || fieldType === 'select') {
+                    // Handle both .radio-options and .radio-group-fieldset structures for radio buttons
+                    const options = Array.from(field.querySelectorAll('.radio-option label, .radio-options label, .radio-group-fieldset .radio-option label, option')).map(opt => opt.textContent.trim()).filter(text => text);
+                    if (options.length > 0) {
+                        fieldData.options = options;
+                    }
+                }
+
+                return fieldData;
+            });
+
+
+            // Trigger form builder UI refresh to display the loaded fields
+
+            // Re-initialize field controls for the restored fields
+            console.log('Re-initializing field controls for restored fields...');
+            if (typeof initializeFieldControls === 'function') {
+                // Field controls are initialized with event delegation, so they should work automatically
+                console.log('Field controls use event delegation - should work automatically');
+            }
+
+            // Re-initialize other interactive features
+            if (typeof initializeLabelEditing === 'function') {
+                initializeLabelEditing();
+                console.log('Re-initialized label editing');
+            }
+
+            if (typeof initializeDragDrop === 'function') {
+                initializeDragDrop();
+                console.log('Re-initialized drag and drop');
+            }
+
+            // Call updateFormData to sync the data
+            if (typeof updateFormData === 'function') {
+                console.log('Calling updateFormData to refresh UI...');
+                updateFormData();
+            }
+
+            // CRITICAL: Actually display the loaded user fields in the editing interface
+            renderUserFieldsInEditor();
+
+            // Check if the form builder is rendering these fields
+            setTimeout(() => {
+                const editableFields = document.querySelectorAll('.editable-field-wrapper');
+                const controlButtons = document.querySelectorAll('.field-controls .control-btn');
+                const dragHandles = document.querySelectorAll('.drag-handle');
+
+                console.log('FORM BUILDER CHECK RESULTS:');
+                console.log('  - Editable field wrappers:', editableFields.length);
+                console.log('  - Control buttons:', controlButtons.length);
+                console.log('  - Drag handles:', dragHandles.length);
+
+                if (editableFields.length > 0 && controlButtons.length > 0) {
+                    console.log('✅ Form builder appears to be working! Fields are editable.');
+                    // Test if a field has the expected structure
+                    const sampleField = editableFields[0];
+                    const hasControls = sampleField.querySelector('.field-controls');
+                    const hasDragHandle = sampleField.querySelector('.drag-handle');
+                    console.log('  Sample field has controls:', !!hasControls, 'drag handle:', !!hasDragHandle);
+                } else {
+                    console.warn('⚠️ Form builder interface may not be fully functional');
+                    console.log('Fields exist but missing interactive controls');
+                }
+            }, 1000);
         }
-        
+
+        function renderUserFieldsInEditor() {
+
+            if (!formData || formData.length === 0) {
+                console.log('No formData to render');
+                return;
+            }
+
+            // Find the add field zone to insert fields before it
+            const addZone = document.getElementById('add-field-zone');
+            if (!addZone) {
+                console.warn('Add field zone not found, cannot render user fields');
+                return;
+            }
+
+            console.log('Rendering', formData.length, 'user fields...');
+
+            // Filter formData to include user-added fields
+            let userFields = formData.filter(field => {
+                // Include any field that appears to be user-added:
+                // 1. Fields with user_field_ prefix
+                // 2. Fields with ai_field_ prefix (restored user fields)
+                // 3. Fields with numeric IDs (like radio groups)
+                // 4. Radio or radio-group fields (always user-added)
+                const hasUserFieldId = field.id && field.id.startsWith('user_field_');
+                const hasAiFieldId = field.id && field.id.startsWith('ai_field_');
+                const hasNumericId = field.id && /^\d+$/.test(field.id);
+                const isRadioType = field.fieldType === 'radio-group' || field.fieldType === 'radio';
+
+                return hasUserFieldId || hasAiFieldId || hasNumericId || isRadioType;
+            });
+
+
+            // Sort userFields by their original document order (based on DOM position)
+            userFields = userFields.sort((a, b) => {
+                const elementA = document.querySelector(`[data-index="${a.id}"]`);
+                const elementB = document.querySelector(`[data-index="${b.id}"]`);
+
+                if (elementA && elementB) {
+                    // Use compareDocumentPosition to determine relative position in DOM
+                    const position = elementA.compareDocumentPosition(elementB);
+                    if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+                    if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+                }
+
+                // Fallback to originalIndex or creation order
+                return (a.originalIndex || 0) - (b.originalIndex || 0);
+            });
+
+            console.log('Found', userFields.length, 'fields that appear to be user-added');
+
+            userFields.forEach((field, index) => {
+                    // Map field types to generateNewFieldHTML compatible types
+                let fieldType = field.fieldType;
+                if (fieldType === 'radio-group') {
+                    fieldType = 'radio';
+                }
+
+                // Generate HTML for this field using the same function as addNewField
+                const fieldHTML = generateNewFieldHTML(fieldType, field.label, field.originalIndex || Date.now() + index);
+
+                // Insert the field before the add field zone
+                addZone.insertAdjacentHTML('beforebegin', fieldHTML);
+            });
+
+            // Reinitialize field listeners for the new fields
+            if (typeof initializeFieldListeners === 'function') {
+                initializeFieldListeners();
+                console.log('Re-initialized field listeners for rendered fields');
+            }
+
+            console.log('✅ Finished rendering user fields in editor');
+        }
+
+        function inferFieldTypeFromElement(field) {
+            // Try to determine field type from the HTML content
+            if (field.querySelector('.radio-options') || field.querySelector('.radio-group-fieldset')) return 'radio';
+            if (field.querySelector('select')) return 'select';
+            if (field.querySelector('textarea')) return 'textarea';
+            if (field.querySelector('input[type="checkbox"]')) return 'checkbox';
+            if (field.querySelector('input[type="email"]')) return 'email';
+            if (field.querySelector('input[type="date"]')) return 'date';
+            return 'text'; // default
+        }
+
         function updateFormData() {
-            const fields = document.querySelectorAll('.editable-field-wrapper');
-            formData = Array.from(fields).map((field, index) => ({
-                id: field.getAttribute('data-index') || `field_${index}`,
-                label: field.querySelector('.editable-label')?.textContent || 'Field',
-                fieldType: field.getAttribute('data-type'),
-                originalIndex: parseInt(field.getAttribute('data-index')) || index,
-                width: field.classList.contains('half-width') ? 'half' : 'full'
-            }));
-            
+
+            // First try to get user-added fields (those with user_field_ prefix in data-index)
+            let fields = document.querySelectorAll('.editable-field-wrapper[data-index^="user_field_"]');
+
+            // If no user_field_ fields found, use the same fallback logic as loadFormData
+            if (fields.length === 0) {
+                console.log('No user_field_ fields found, using fallback detection...');
+                const allEditableFields = document.querySelectorAll('.editable-field-wrapper');
+
+                const potentialUserFields = Array.from(allEditableFields).filter(field => {
+                    const dataType = field.getAttribute('data-type');
+                    const dataIndex = field.getAttribute('data-index');
+                    const isFormInput = dataType === 'form_input';
+                    const hasAiFieldIndex = dataIndex && dataIndex.startsWith('ai_field_');
+                    const hasNumericIndex = dataIndex && /^\d+$/.test(dataIndex);
+                    const mightBeRestoredUserField = (isFormInput && hasAiFieldIndex) || hasNumericIndex;
+                    const isUserFieldType = dataType === 'text' || dataType === 'textarea' ||
+                                          dataType === 'select' || dataType === 'radio' || dataType === 'checkbox' ||
+                                          dataType === 'radio-group';
+                    return mightBeRestoredUserField || isUserFieldType;
+                });
+
+                if (potentialUserFields.length > 0) {
+                    console.log('Found', potentialUserFields.length, 'potential user fields for updateFormData');
+                    fields = potentialUserFields;
+                }
+            }
+            // Track used IDs to prevent duplicates
+            const usedIds = new Set();
+
+            formData = Array.from(fields).map((field, index) => {
+                const fieldType = field.getAttribute('data-type') || inferFieldTypeFromElement(field);
+
+                // Try multiple selectors for the label
+                let label = 'Field';
+                const labelSelectors = [
+                    '.editable-label',
+                    'legend.editable-label',
+                    'fieldset legend',
+                    'label.editable-label',
+                    'span.editable-label',
+                    'div.editable-label',
+                    'label',
+                    'input[type="text"]',
+                    'textarea'
+                ];
+
+                for (const selector of labelSelectors) {
+                    const labelElement = field.querySelector(selector);
+                    if (labelElement && labelElement.textContent && labelElement.textContent.trim()) {
+                        const extractedLabel = labelElement.textContent.trim();
+                        // Skip generic placeholders or empty labels
+                        if (extractedLabel !== 'Field' && extractedLabel !== '' && extractedLabel.length > 0) {
+                            label = extractedLabel;
+                            break;
+                        }
+                    }
+                }
+
+                // If still "Field", try to get a placeholder or name attribute
+                if (label === 'Field') {
+                    const input = field.querySelector('input, textarea');
+                    if (input) {
+                        const placeholder = input.getAttribute('placeholder');
+                        const name = input.getAttribute('name');
+                        if (placeholder && placeholder.trim()) {
+                            label = placeholder.trim();
+                        } else if (name && name.trim()) {
+                            label = name.replace(/_/g, ' ').trim();
+                        }
+                    }
+                }
+
+                // Generate unique ID
+                let proposedId = field.getAttribute('data-index') || `user_field_${index}`;
+                let finalId = proposedId;
+                let counter = 1;
+
+                // If ID is already used, append a counter until we find a unique one
+                while (usedIds.has(finalId)) {
+                    finalId = `${proposedId}_${counter}`;
+                    counter++;
+                }
+                usedIds.add(finalId);
+
+                // Update the field's data-index if it was changed to ensure consistency
+                if (finalId !== proposedId) {
+                    field.setAttribute('data-index', finalId);
+                }
+
+                let fieldData = {
+                    id: finalId,
+                    label: label,
+                    fieldType: fieldType,
+                    originalIndex: parseInt(field.getAttribute('data-index')?.replace('user_field_', '')) || index,
+                    width: field.classList.contains('half-width') ? 'half' : 'full'
+                };
+
+                // Capture options for radio buttons and dropdowns
+                if (fieldType === 'radio') {
+                    // Handle both .radio-options (old style) and .radio-group-fieldset (new style)
+                    const radioLabels = field.querySelectorAll('.radio-options label, .radio-group-fieldset .radio-option label');
+                    fieldData.options = Array.from(radioLabels).map(label => {
+                        const input = label.querySelector('input[type="radio"]');
+                        return input ? input.value : label.textContent.trim();
+                    }).filter(option => option);
+                } else if (fieldType === 'select') {
+                    const selectElement = field.querySelector('select');
+                    if (selectElement) {
+                        fieldData.options = Array.from(selectElement.options).map(option => option.textContent);
+                    }
+                }
+
+                return fieldData;
+            });
         }
         
         
@@ -3411,7 +4487,13 @@ defmodule Paperform2web.HtmlGenerator do
             saveStatus.textContent = 'Saving...';
             saveStatus.className = '';
             saveStatus.style.opacity = '1';
-            
+
+            // Debug: Update form data and log it
+            console.log('🚨 SAVE OPERATION - Updating form data...');
+            updateFormData();
+            console.log('🚨 SAVE DEBUG - Form data being sent:', formData);
+            console.log('🚨 Total fields being saved:', formData.length);
+
             try {
                 const response = await fetch(`/api/documents/#{document_id}/form_structure`, {
                     method: 'PATCH',

@@ -13,8 +13,9 @@
       
       <div class="flex items-center space-x-2">
         <StatusBadge :status="document.status" />
-        <div v-if="document.status === 'failed'" class="flex items-center space-x-2">
+        <div class="flex items-center space-x-2">
           <button
+            v-if="document.status === 'failed'"
             @click="retryProcessing"
             class="text-sm text-primary-600 hover:text-primary-700 px-2 py-1 rounded hover:bg-primary-50"
           >
@@ -23,7 +24,7 @@
           <button
             @click="showDeleteConfirm"
             class="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
-            title="Delete failed document"
+            :title="document.status === 'failed' ? 'Delete failed document' : 'Cancel and delete document'"
           >
             <TrashIcon class="w-4 h-4" />
           </button>
@@ -34,14 +35,14 @@
     <!-- Progress Bar -->
     <div class="space-y-2">
       <div class="flex justify-between text-sm">
-        <span class="text-gray-600">{{ getProgressLabel() }}</span>
-        <span class="text-gray-900 font-medium">{{ document.progress }}%</span>
+        <span class="text-gray-600">{{ currentStatusMessage || progressLabel }}</span>
+        <span class="text-gray-900 font-medium">{{ smoothProgress }}%</span>
       </div>
       <div class="w-full bg-gray-200 rounded-full h-2">
-        <div 
+        <div
           class="h-2 rounded-full transition-all duration-300"
-          :class="getProgressBarClass()"
-          :style="{ width: document.progress + '%' }"
+          :class="progressBarClass"
+          :style="{ width: smoothProgress + '%' }"
         ></div>
       </div>
     </div>
@@ -77,13 +78,23 @@
             <ExclamationTriangleIcon class="w-5 h-5 text-red-600" />
           </div>
           <div>
-            <h3 class="text-lg font-medium text-gray-900">Delete Failed Document</h3>
+            <h3 class="text-lg font-medium text-gray-900">
+              {{ document.status === 'failed' ? 'Delete Failed Document' : 'Cancel Processing' }}
+            </h3>
             <p class="text-sm text-gray-500">This action cannot be undone.</p>
           </div>
         </div>
 
         <p class="text-sm text-gray-700 mb-6">
-          Are you sure you want to delete the failed processing job for "<span class="font-medium">{{ document.filename }}</span>"?
+          <span v-if="document.status === 'failed'">
+            Are you sure you want to delete the failed processing job for "<span class="font-medium">{{ document.filename }}</span>"?
+          </span>
+          <span v-else-if="document.status === 'processing'">
+            Are you sure you want to cancel processing and delete "<span class="font-medium">{{ document.filename }}</span>"? The document will stop processing immediately.
+          </span>
+          <span v-else>
+            Are you sure you want to delete "<span class="font-medium">{{ document.filename }}</span>"?
+          </span>
         </p>
 
         <div class="flex space-x-3 justify-end">
@@ -101,9 +112,9 @@
           >
             <div v-if="deleting" class="flex items-center space-x-2">
               <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              <span>Deleting...</span>
+              <span>{{ document.status === 'processing' ? 'Canceling...' : 'Deleting...' }}</span>
             </div>
-            <span v-else>Delete</span>
+            <span v-else>{{ document.status === 'processing' ? 'Stop & Delete' : 'Delete' }}</span>
           </button>
         </div>
       </div>
@@ -112,7 +123,7 @@
 </template>
 
 <script>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { DocumentTextIcon, ExclamationTriangleIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import StatusBadge from './StatusBadge.vue'
 import { documentsApi } from '../services/api.js'
@@ -138,7 +149,8 @@ export default {
     const deleting = ref(false)
     const channel = ref(null)
 
-    const getProgressLabel = () => {
+    // Use computed properties to prevent unnecessary re-renders
+    const progressLabel = computed(() => {
       switch (props.document.status) {
         case 'uploaded':
           return 'Queued for processing'
@@ -151,9 +163,9 @@ export default {
         default:
           return 'Unknown status'
       }
-    }
+    })
 
-    const getProgressBarClass = () => {
+    const progressBarClass = computed(() => {
       switch (props.document.status) {
         case 'uploaded':
           return 'bg-gray-400'
@@ -166,7 +178,17 @@ export default {
         default:
           return 'bg-gray-400'
       }
-    }
+    })
+
+    // Debounced progress to prevent flashing
+    const smoothProgress = computed(() => {
+      return Math.min(100, Math.max(0, props.document.progress || 0))
+    })
+
+    // Current status message for detailed progress info
+    const currentStatusMessage = computed(() => {
+      return props.document.status_message
+    })
 
     const formatTime = (timestamp) => {
       if (!timestamp) return 'Unknown'
@@ -191,6 +213,7 @@ export default {
       })
     }
 
+
     const subscribeToUpdates = async () => {
       try {
         // Connect to WebSocket if not already connected
@@ -199,26 +222,39 @@ export default {
         // Subscribe to document updates
         channel.value = webSocketService.subscribeToDocument(props.document.id, {
           onJoin: (response) => {
-            console.log('Joined document channel:', response)
+            console.log('✅ Joined document channel for document:', props.document.id, response)
           },
           onDocumentUpdate: (payload) => {
-            console.log('Document updated via WebSocket:', payload)
-            emit('status-update', payload)
+            console.log('📄 Document updated via WebSocket:', payload)
+            // Only emit if this is the same document
+            if (payload.id === props.document.id) {
+              emit('status-update', payload)
+            }
           },
           onStatusUpdate: (payload) => {
-            console.log('Status updated via WebSocket:', payload)
-            // Merge status update with existing document data
-            const updatedDocument = {
-              ...props.document,
-              ...payload
+            console.log('📊 Status updated via WebSocket:', payload)
+            // Only emit if this update is for our document
+            if (payload.id && payload.id === props.document.id) {
+              // Merge status update with existing document data
+              const updatedDocument = {
+                ...props.document,
+                ...payload
+              }
+              emit('status-update', updatedDocument)
+            } else if (!payload.id) {
+              // If no ID in payload, assume it's for our document (legacy format)
+              const updatedDocument = {
+                ...props.document,
+                ...payload
+              }
+              emit('status-update', updatedDocument)
             }
-            emit('status-update', updatedDocument)
           },
           onError: (error) => {
-            console.error('WebSocket error:', error)
+            console.error('❌ WebSocket error:', error)
           },
           onClose: () => {
-            console.log('WebSocket channel closed')
+            console.log('🔌 WebSocket channel closed')
           }
         })
       } catch (error) {
@@ -304,8 +340,10 @@ export default {
     return {
       showDeleteDialog,
       deleting,
-      getProgressLabel,
-      getProgressBarClass,
+      progressLabel,
+      progressBarClass,
+      smoothProgress,
+      currentStatusMessage,
       formatTime,
       retryProcessing,
       showDeleteConfirm,

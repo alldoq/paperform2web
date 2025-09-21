@@ -79,9 +79,14 @@ defmodule Paperform2web.DocumentProcessor do
             {:ok, processed_data}
 
           {:error, error} ->
-            Logger.error("Failed to process document #{document_id}: #{error}")
-            Documents.update_document_status(document_id, "failed", 0, error)
-            {:error, error}
+            error_message = case error do
+              %Jason.DecodeError{} -> "AI returned invalid JSON response"
+              binary when is_binary(binary) -> binary
+              other -> inspect(other)
+            end
+            Logger.error("Failed to process document #{document_id}: #{error_message}")
+            Documents.update_document_status(document_id, "failed", 0, error_message)
+            {:error, error_message}
         end
 
       {:error, error} ->
@@ -98,16 +103,28 @@ defmodule Paperform2web.DocumentProcessor do
     |> Enum.with_index(1)
     |> Enum.map(fn {page_info, index} ->
       Logger.info("Processing page #{index}/#{total_pages} for document #{document_id}")
+
+      # Update progress with current page info
       progress = 40 + trunc((index / total_pages) * 50)
-      Documents.update_document_status(document_id, "processing", progress)
+      page_status = "Processing page #{index} of #{total_pages}"
+      Documents.update_document_status(document_id, "processing", progress, page_status)
 
       case read_image_file(page_info.file_path) do
         {:ok, image_data} ->
           case OllamaClient.process_document(image_data, model) do
             {:ok, {processed_data, _raw_response}} ->
+              Logger.info("Completed processing page #{index}/#{total_pages} for document #{document_id}")
+              completed_page_status = "Completed page #{index} of #{total_pages}"
+              Documents.update_document_status(document_id, "processing", progress, completed_page_status)
               {:ok, %{page_number: page_info.page_number, data: processed_data}}
             {:error, error} ->
-              {:error, "Failed to process page #{page_info.page_number}: #{error}"}
+              error_message = case error do
+                %Jason.DecodeError{} -> "AI returned invalid JSON response"
+                binary when is_binary(binary) -> binary
+                other -> inspect(other)
+              end
+              Logger.error("Failed to process page #{page_info.page_number}: #{error_message}")
+              {:error, "Failed to process page #{page_info.page_number}: #{error_message}"}
           end
         {:error, error} ->
           {:error, "Failed to read page #{page_info.page_number}: #{error}"}
