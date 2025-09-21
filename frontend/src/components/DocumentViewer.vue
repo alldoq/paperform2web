@@ -27,9 +27,29 @@
         </button>
       </div>
 
-      <!-- Main Template Selection Content -->
-      <div class="flex-1 overflow-hidden bg-gradient-to-br from-gray-50 via-blue-50/30 to-gray-100">
-        <div v-if="document.status === 'completed'" class="h-full p-8 overflow-auto">
+      <!-- Tabs Navigation -->
+      <div class="border-b border-gray-200 bg-white">
+        <nav class="flex space-x-8 px-6" aria-label="Tabs">
+          <button
+            v-for="tab in tabs"
+            :key="tab.id"
+            @click="activeTab = tab.id"
+            :class="[
+              activeTab === tab.id
+                ? 'border-primary-500 text-primary-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300',
+              'whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm'
+            ]"
+          >
+            {{ tab.name }}
+          </button>
+        </nav>
+      </div>
+
+      <!-- Tab Content -->
+      <div class="flex-1 overflow-y-auto bg-gradient-to-br from-gray-50 via-blue-50/30 to-gray-100">
+        <!-- Template Tab -->
+        <div v-if="activeTab === 'template' && document.status === 'completed'" class="p-8">
           <div class="max-w-6xl mx-auto">
 
             <!-- Header Section -->
@@ -88,6 +108,39 @@ Choose a template for your form:
           </div>
         </div>
 
+        <!-- Shares Tab -->
+        <div v-else-if="activeTab === 'shares'">
+          <SharesList
+            :document-id="document.id"
+            @create-share="showShareDialog = true"
+            @view-analytics="viewShareAnalytics"
+          />
+        </div>
+
+        <!-- Analytics Tab -->
+        <div v-else-if="activeTab === 'analytics'">
+          <div v-if="selectedShareToken">
+            <ShareAnalytics :share-token="selectedShareToken" />
+          </div>
+          <div v-else class="flex items-center justify-center h-full">
+            <div class="text-center space-y-4">
+              <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
+                <span class="text-2xl text-gray-400">A</span>
+              </div>
+              <div>
+                <p class="text-gray-900 font-medium">No Analytics Selected</p>
+                <p class="text-sm text-gray-500 mt-1">Select a share from the Shares tab to view analytics</p>
+              </div>
+              <button
+                @click="activeTab = 'shares'"
+                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
+              >
+                Go to Shares
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- Processing State -->
         <div v-else class="flex items-center justify-center h-full">
           <div class="text-center space-y-4">
@@ -106,39 +159,59 @@ Choose a template for your form:
 
       <!-- Footer -->
       <div class="flex items-center justify-between p-6 border-t border-gray-200 bg-gray-50">
-        <div class="flex items-center space-x-3">
+        <div class="flex items-center space-x-2">
           <button
             @click="openHTMLInNewTab"
             v-if="document.status === 'completed'"
-            class="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-primary-100 text-primary-700 hover:bg-primary-200 border border-primary-200"
+            class="flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors bg-white text-gray-700 hover:bg-gray-100 border border-gray-300"
           >
-            👁️ Preview
+            <EyeIcon class="w-4 h-4" />
+            <span>Preview</span>
           </button>
           <button
             @click="openEditableHTMLInNewTab"
             v-if="document.status === 'completed'"
-            class="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-green-500 text-white hover:bg-green-600 shadow-md"
+            class="flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors bg-white text-gray-700 hover:bg-gray-100 border border-gray-300"
           >
-            ✏️ Edit
+            <PencilIcon class="w-4 h-4" />
+            <span>Edit</span>
+          </button>
+          <button
+            @click="showShareDialog = true"
+            v-if="document.status === 'completed'"
+            class="flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors bg-blue-600 text-white hover:bg-blue-700 shadow-sm"
+          >
+            <ShareIcon class="w-4 h-4" />
+            <span>Share</span>
           </button>
         </div>
 
-
         <button
           @click="$emit('close')"
-          class="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-gray-500 text-white hover:bg-gray-600"
+          class="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-gray-200 text-gray-800 hover:bg-gray-300"
         >
           Close
         </button>
       </div>
+
+      <!-- Share Dialog -->
+      <ShareDialog
+        v-if="showShareDialog"
+        :document="document"
+        @close="showShareDialog = false"
+        @share-sent="onShareSent"
+      />
     </div>
   </div>
 </template>
 
 <script>
 import { ref, watch } from 'vue'
-import { DocumentTextIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { DocumentTextIcon, XMarkIcon, ShareIcon, EyeIcon, PencilIcon } from '@heroicons/vue/24/outline'
 import StatusBadge from './StatusBadge.vue'
+import ShareDialog from './ShareDialog.vue'
+import SharesList from './SharesList.vue'
+import ShareAnalytics from './ShareAnalytics.vue'
 import { documentsApi } from '../services/api.js'
 
 export default {
@@ -146,7 +219,13 @@ export default {
   components: {
     DocumentTextIcon,
     XMarkIcon,
-    StatusBadge
+    ShareIcon,
+    EyeIcon,
+    PencilIcon,
+    StatusBadge,
+    ShareDialog,
+    SharesList,
+    ShareAnalytics
   },
   props: {
     document: {
@@ -158,6 +237,15 @@ export default {
   setup(props, { emit }) {
     const selectedTheme = ref(props.document.theme || 'default')
     const isUpdatingTheme = ref(false)
+    const showShareDialog = ref(false)
+    const activeTab = ref('template')
+    const selectedShareToken = ref(null)
+
+    const tabs = ref([
+      { id: 'template', name: 'Template' },
+      { id: 'shares', name: 'Shares' },
+      { id: 'analytics', name: 'Analytics' }
+    ])
 
 
     const templateOptions = ref([
@@ -312,9 +400,23 @@ export default {
       }
     }
 
+    const onShareSent = (shareData) => {
+      console.log('Form shared successfully:', shareData)
+      showShareDialog.value = false
+    }
+
+    const viewShareAnalytics = (share) => {
+      selectedShareToken.value = share.share_token
+      activeTab.value = 'analytics'
+    }
+
     return {
       selectedTheme,
       isUpdatingTheme,
+      showShareDialog,
+      activeTab,
+      selectedShareToken,
+      tabs,
       templateOptions,
       formatDate,
       downloadHTML,
@@ -322,7 +424,9 @@ export default {
       openEditableHTMLInNewTab,
       updateTheme,
       getTemplateName,
-      selectTemplate
+      selectTemplate,
+      onShareSent,
+      viewShareAnalytics
     }
   }
 }

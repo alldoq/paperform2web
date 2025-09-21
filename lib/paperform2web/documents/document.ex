@@ -18,6 +18,7 @@ defmodule Paperform2web.Documents.Document do
     field :status_message, :string
     
     belongs_to :template, Paperform2web.Templates.Template
+    has_many :document_shares, Paperform2web.Documents.DocumentShare
 
     timestamps(type: :utc_datetime)
   end

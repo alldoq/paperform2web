@@ -6,9 +6,14 @@ defmodule Paperform2web.Documents do
   import Ecto.Query, warn: false
   alias Paperform2web.Repo
   alias Paperform2web.Documents.Document
+  alias Paperform2web.Documents.DocumentShare
+  alias Paperform2web.Documents.FormResponse
+  alias Paperform2web.Documents.ResponseAnalytics
   alias Paperform2web.DocumentProcessor
   alias Paperform2web.HtmlGenerator
   alias Paperform2web.Templates
+  alias Paperform2web.Mailer
+  alias Paperform2web.Emails.ShareEmail
   require Logger
 
   @doc """
@@ -410,5 +415,241 @@ defmodule Paperform2web.Documents do
     # Use DocumentChannel to broadcast updates
     alias Paperform2webWeb.DocumentChannel
     DocumentChannel.broadcast_document_update(document.id, document)
+  end
+
+  ## Document Sharing Functions
+
+  @doc """
+  Creates a document share and sends an email invitation.
+  """
+  def create_document_share(document, attrs) do
+    %DocumentShare{}
+    |> DocumentShare.changeset(Map.put(attrs, "document_id", document.id))
+    |> Repo.insert()
+    |> case do
+      {:ok, share} ->
+        # Send email invitation
+        send_share_email(share, document)
+        {:ok, share}
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Gets a document share by token.
+  """
+  def get_document_share_by_token(token) do
+    Repo.get_by(DocumentShare, share_token: token)
+    |> Repo.preload(:document)
+  end
+
+  @doc """
+  Lists all shares for a document.
+  """
+  def list_document_shares(document_id) do
+    from(s in DocumentShare,
+      where: s.document_id == ^document_id,
+      order_by: [desc: s.inserted_at]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Records that a shared form was opened.
+  """
+  def record_form_open(share_token) do
+    case get_document_share_by_token(share_token) do
+      nil ->
+        {:error, :not_found}
+
+      share ->
+        now = DateTime.utc_now()
+
+        updates = %{
+          status: "opened",
+          total_opens: share.total_opens + 1
+        }
+
+        # Set first open time if not already set
+        updates = if is_nil(share.opened_at) do
+          Map.put(updates, :opened_at, now)
+        else
+          updates
+        end
+
+        share
+        |> DocumentShare.changeset(updates)
+        |> Repo.update()
+    end
+  end
+
+  @doc """
+  Submits a form response.
+  """
+  def submit_form_response(share_token, response_data, session_id \\ nil) do
+    case get_document_share_by_token(share_token) do
+      nil ->
+        {:error, :not_found}
+
+      share ->
+        session_id = session_id || generate_session_id()
+
+        attrs = %{
+          "document_share_id" => share.id,
+          "session_id" => session_id,
+          "form_data" => response_data,
+          "is_completed" => Map.get(response_data, "is_completed", false),
+          "completion_time_seconds" => Map.get(response_data, "completion_time_seconds")
+        }
+
+        case create_form_response(attrs) do
+          {:ok, response} ->
+            # Update share statistics
+            update_share_statistics(share, response)
+
+            # Update analytics
+            update_response_analytics(share, response_data)
+
+            {:ok, response}
+          error ->
+            error
+        end
+    end
+  end
+
+  @doc """
+  Creates a form response.
+  """
+  def create_form_response(attrs) do
+    %FormResponse{}
+    |> FormResponse.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc """
+  Gets share analytics data.
+  """
+  def get_share_analytics(share_token) do
+    case get_document_share_by_token(share_token) do
+      nil ->
+        {:error, :not_found}
+
+      share ->
+        analytics = from(a in ResponseAnalytics,
+          where: a.document_share_id == ^share.id,
+          order_by: [asc: a.field_key]
+        )
+        |> Repo.all()
+
+        responses = from(r in FormResponse,
+          where: r.document_share_id == ^share.id,
+          order_by: [desc: r.inserted_at]
+        )
+        |> Repo.all()
+
+        {:ok, %{
+          share: share,
+          analytics: analytics,
+          responses: responses,
+          total_responses: length(responses),
+          completed_responses: Enum.count(responses, & &1.is_completed)
+        }}
+    end
+  end
+
+  ## Private Helper Functions
+
+  defp generate_session_id do
+    :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
+  end
+
+  defp send_share_email(share, document) do
+    # Create and send email using Swoosh
+    email = ShareEmail.form_invitation(share, document)
+
+    case Mailer.deliver(email) do
+      {:ok, _result} ->
+        Logger.info("📧 Email sent successfully to #{share.recipient_email}")
+
+        # Update share status to sent
+        share
+        |> DocumentShare.changeset(%{status: "sent", sent_at: DateTime.utc_now()})
+        |> Repo.update()
+
+      {:error, reason} ->
+        Logger.error("📧 Failed to send email to #{share.recipient_email}: #{inspect(reason)}")
+
+        # Update share status to failed
+        share
+        |> DocumentShare.changeset(%{status: "failed"})
+        |> Repo.update()
+    end
+  end
+
+  defp update_share_statistics(share, response) do
+    now = DateTime.utc_now()
+
+    updates = %{
+      response_count: share.response_count + 1
+    }
+
+    # Set first response time if not already set
+    updates = if is_nil(share.first_response_at) do
+      Map.put(updates, :first_response_at, now)
+    else
+      updates
+    end
+
+    # Always update last response time
+    updates = Map.put(updates, :last_response_at, now)
+
+    # Update completion status
+    updates = if response.is_completed do
+      Map.put(updates, :is_completed, true)
+    else
+      updates
+    end
+
+    share
+    |> DocumentShare.changeset(updates)
+    |> Repo.update()
+  end
+
+  defp update_response_analytics(share, response_data) do
+    # Extract field responses and update analytics
+    form_data = Map.get(response_data, "form_data", %{})
+
+    Enum.each(form_data, fn {field_key, field_data} ->
+      field_type = Map.get(field_data, "type", "text")
+      field_label = Map.get(field_data, "label", field_key)
+      response_value = to_string(Map.get(field_data, "value", ""))
+
+      # Upsert analytics record
+      attrs = %{
+        "document_share_id" => share.id,
+        "field_key" => field_key,
+        "field_type" => field_type,
+        "field_label" => field_label,
+        "response_value" => response_value,
+        "response_count" => 1
+      }
+
+      case Repo.get_by(ResponseAnalytics,
+        document_share_id: share.id,
+        field_key: field_key,
+        response_value: response_value
+      ) do
+        nil ->
+          %ResponseAnalytics{}
+          |> ResponseAnalytics.changeset(attrs)
+          |> Repo.insert()
+
+        existing ->
+          existing
+          |> ResponseAnalytics.changeset(%{"response_count" => existing.response_count + 1})
+          |> Repo.update()
+      end
+    end)
   end
 end

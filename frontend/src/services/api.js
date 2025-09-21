@@ -122,6 +122,20 @@ export const documentsApi = {
   // Update document form structure
   updateFormStructure: (id, formFields) => {
     return api.patch(`/documents/${id}/form_structure`, { form_fields: formFields })
+  },
+
+  // Share management
+  createShare: (id, shareData) => {
+    return api.post(`/documents/${id}/share`, shareData)
+  },
+
+  getShares: (id) => {
+    return api.get(`/documents/${id}/shares`)
+  },
+
+  // Analytics
+  getShareAnalytics: (token) => {
+    return api.get(`/share/${token}/analytics`)
   }
 }
 

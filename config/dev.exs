@@ -65,6 +65,13 @@ config :phoenix, :plug_init_mode, :runtime
 # Disable swoosh api client as it is only required for production adapters.
 config :swoosh, :api_client, false
 
+# Configure Swoosh mailer for development
+config :paperform2web, Paperform2web.Mailer,
+  adapter: Swoosh.Adapters.Local
+
+# Configure base URL for email links
+config :paperform2web, :base_url, "http://localhost:4000"
+
 # Configure Ollama client
 config :paperform2web, :ollama_url, "https://openrouter.ai/api/v1"
 

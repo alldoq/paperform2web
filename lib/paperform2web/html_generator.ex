@@ -20,7 +20,7 @@ defmodule Paperform2web.HtmlGenerator do
       false -> {:error, "Missing required data fields"}
     end
   end
-  
+
   defp validate_data(_), do: {:error, "Invalid data format"}
 
   defp build_html_document(data, options) do
@@ -64,7 +64,7 @@ defmodule Paperform2web.HtmlGenerator do
         #{if editing_mode, do: generate_editing_toolbar(document_id), else: generate_preview_toolbar(document_id)}
         <div class="container">
             #{generate_header(data, editing_mode)}
-            #{content_html}
+            #{if editing_mode, do: content_html, else: generate_form_wrapper(content_html, document_id, options)}
             #{generate_metadata_section(data["metadata"], options)}
         </div>
         #{generate_javascript(editing_mode, document_id)}
@@ -76,7 +76,7 @@ defmodule Paperform2web.HtmlGenerator do
 
   defp generate_header(data, editing_mode \\ false) do
     title = data["title"] || "Document"
-    
+
     if editing_mode do
       """
       <header class="document-header">
@@ -111,9 +111,17 @@ defmodule Paperform2web.HtmlGenerator do
         end
       end)
     else
-      sections
+      # Also group radio sections in preview mode
+      grouped_sections = group_radio_sections(sections)
+      grouped_sections
       |> Enum.with_index()
-      |> Enum.map_join("\n", fn {section, index} -> generate_form_section(section, index) end)
+      |> Enum.map_join("\n", fn {section_group, index} ->
+        if is_list(section_group) do
+          generate_form_radio_group(section_group, index)
+        else
+          generate_form_section(section_group, index)
+        end
+      end)
     end
 
     """
@@ -459,6 +467,31 @@ defmodule Paperform2web.HtmlGenerator do
     result
   end
 
+  defp generate_form_radio_group(radio_sections, index) do
+    # This function is for preview mode
+    {labels, radio_inputs} = Enum.split_with(radio_sections, fn s -> s["type"] == "form_label" end)
+
+    question_text = case labels do
+      [label | _] -> label["content"]
+      _ -> "Radio Group"
+    end
+
+    field_name = get_in(List.first(radio_inputs), ["metadata", "field_name"]) || "radio_group_#{index}"
+
+    radio_buttons_html = Enum.map_join(radio_inputs, "\n", fn section ->
+      generate_form_input(section["content"], "", "", section)
+    end)
+
+    """
+    <div class="form-field radio-field">
+      <span class="radio-group-label">#{escape_html(question_text)}</span>
+      <div class="radio-options">
+        #{radio_buttons_html}
+      </div>
+    </div>
+    """
+  end
+
   # Generate a fieldset for a group of radio buttons
   defp generate_radio_fieldset(radio_sections, index) do
     # Separate form_label from radio inputs
@@ -560,9 +593,54 @@ defmodule Paperform2web.HtmlGenerator do
       "form_section" ->
         "<h2 class=\"form-section #{css_classes}#{width_class}\" style=\"#{inline_styles}\">#{escape_html(content)}</h2>"
 
+      # Check if this is a user-added field that was restored without proper type metadata
+      # Also handle radio button fields created in edit mode
+      "radio" ->
+        # Handle radio button fields created in edit mode - these contain multiple options
+        options = get_in(section, ["metadata", "options"]) || []
+        if length(options) > 0 do
+          # Generate radio group with the provided options
+          radio_buttons = Enum.with_index(options, fn option, idx ->
+            radio_id = "#{field_name}_#{idx}"
+            """
+            <div class="radio-option">
+              <input type="radio" id="#{radio_id}" name="#{field_name}" value="#{escape_html(option)}" />
+              <label for="#{radio_id}">#{escape_html(option)}</label>
+            </div>
+            """
+          end) |> Enum.join("")
+
+          """
+          <div class="form-field radio-field">
+            <span class="radio-group-label">#{escape_html(content)}</span>
+            <div class="radio-options">
+              #{radio_buttons}
+            </div>
+          </div>
+          """
+        else
+          # Fallback to form_input generation for radio without options
+          generate_form_input(content, "#{css_classes}#{width_class}", inline_styles, section)
+        end
+
       _ ->
-        # Fallback to legacy type-based generation
-        generate_legacy_form_section(type, content, css_classes, inline_styles, width_class, field_name, section, index)
+        cond do
+          # Check for form_field_id (indicates user-added field)
+          Map.has_key?(section, "form_field_id") ->
+            generate_form_input(content, "#{css_classes}#{width_class}", inline_styles, section)
+
+          # Check if field_name starts with user_field_ (restored user field)
+          String.starts_with?(field_name, "user_field_") ->
+            generate_form_input(content, "#{css_classes}#{width_class}", inline_styles, section)
+
+          # Check if it's a form_input type (AI-detected form field)
+          type == "form_input" ->
+            generate_form_input(content, "#{css_classes}#{width_class}", inline_styles, section)
+
+          # Fallback to legacy type-based generation
+          true ->
+            generate_legacy_form_section(type, content, css_classes, inline_styles, width_class, field_name, section, index)
+        end
     end
   end
 
@@ -575,7 +653,7 @@ defmodule Paperform2web.HtmlGenerator do
             <input type="text" id="#{field_name}" name="#{field_name}" placeholder="#{escape_html(content)}" />
         </div>
         """
-        
+
       "textarea" ->
         """
         <div class="form-field#{width_class} #{css_classes}" style="#{inline_styles}">
@@ -583,7 +661,7 @@ defmodule Paperform2web.HtmlGenerator do
             <textarea id="#{field_name}" name="#{field_name}" rows="3" placeholder="#{escape_html(content)}"></textarea>
         </div>
         """
-        
+
       "checkbox" ->
         """
         <div class="form-field#{width_class} checkbox-field #{css_classes}" style="#{inline_styles}">
@@ -591,20 +669,20 @@ defmodule Paperform2web.HtmlGenerator do
             <label for="#{field_name}">#{escape_html(content)}</label>
         </div>
         """
-        
+
       "select" ->
         options = get_in(section, ["metadata", "options"]) || ["Option 1", "Option 2", "Option 3"]
         options_html = Enum.map_join(options, "", fn option ->
           "<option value=\"#{escape_html(option)}\">#{escape_html(option)}</option>"
         end)
-        
+
         """
         <div class="form-field#{width_class} #{css_classes}" style="#{inline_styles}">
             <label for="#{field_name}">#{escape_html(content)}</label>
             <select id="#{field_name}" name="#{field_name}">#{options_html}</select>
         </div>
         """
-        
+
       "email" ->
         """
         <div class="form-field#{width_class} #{css_classes}" style="#{inline_styles}">
@@ -612,7 +690,7 @@ defmodule Paperform2web.HtmlGenerator do
             <input type="email" id="#{field_name}" name="#{field_name}" placeholder="#{escape_html(content)}" />
         </div>
         """
-        
+
       "date" ->
         """
         <div class="form-field#{width_class} #{css_classes}" style="#{inline_styles}">
@@ -620,14 +698,14 @@ defmodule Paperform2web.HtmlGenerator do
             <input type="date" id="#{field_name}" name="#{field_name}" />
         </div>
         """
-        
+
       # Handle legacy types and convert them to proper form fields
       "form_field" ->
         generate_form_field(content, css_classes <> width_class, inline_styles, section)
-      
+
       "form_input" ->
         generate_form_input(content, css_classes <> width_class, inline_styles, section)
-        
+
       _ ->
         # Default to text input for any other type
         """
@@ -644,35 +722,35 @@ defmodule Paperform2web.HtmlGenerator do
     content = section["content"] || ""
     formatting = section["formatting"] || %{}
     position = section["position"] || %{}
-    
+
     css_classes = build_css_classes(type, formatting)
     inline_styles = build_inline_styles(formatting, position)
-    
+
     case type do
       "header" ->
         level = determine_header_level(formatting)
         "<h#{level} class=\"#{css_classes}\" style=\"#{inline_styles}\">#{escape_html(content)}</h#{level}>"
-        
+
       "paragraph" ->
         "<p class=\"#{css_classes}\" style=\"#{inline_styles}\">#{escape_html(content)}</p>"
-        
+
       "list" ->
         generate_list(content, css_classes, inline_styles)
-        
+
       "table" ->
         generate_table(content, css_classes, inline_styles)
-        
+
       # Legacy support
       "form_field" ->
         generate_form_field(content, css_classes, inline_styles, section)
-      
+
       # New form-specific types
       "form_title" ->
         "<h1 class=\"form-title #{css_classes}\" style=\"#{inline_styles}\">#{escape_html(content)}</h1>"
-      
+
       "form_section" ->
         "<h2 class=\"form-section #{css_classes}\" style=\"#{inline_styles}\">#{escape_html(content)}</h2>"
-      
+
       "form_label" ->
         # Check if this label is associated with a specific field
         field_name = get_in(section, ["metadata", "field_name"])
@@ -683,13 +761,13 @@ defmodule Paperform2web.HtmlGenerator do
           # This is standalone descriptive text (like a question)
           "<div class=\"form-question #{css_classes}\" style=\"#{inline_styles}\">#{escape_html(content)}</div>"
         end
-      
+
       "form_input" ->
         generate_form_input(content, css_classes, inline_styles, section)
-      
+
       "form_group" ->
         "<div class=\"form-group #{css_classes}\" style=\"#{inline_styles}\">#{generate_form_group_content(section)}</div>"
-        
+
       _ ->
         "<div class=\"#{css_classes}\" style=\"#{inline_styles}\">#{escape_html(content)}</div>"
     end
@@ -700,20 +778,20 @@ defmodule Paperform2web.HtmlGenerator do
     items_html = Enum.map_join(items, "", fn item ->
       "<li>#{escape_html(String.trim(item))}</li>"
     end)
-    
+
     "<ul class=\"#{css_classes}\" style=\"#{inline_styles}\">#{items_html}</ul>"
   end
 
   defp generate_table(content, css_classes, inline_styles) do
     rows = String.split(content, "\n") |> Enum.reject(&(&1 == ""))
-    
+
     case rows do
       [header | data_rows] ->
         header_cells = String.split(header, "|") |> Enum.map(&String.trim/1)
         header_html = Enum.map_join(header_cells, "", fn cell ->
           "<th>#{escape_html(cell)}</th>"
         end)
-        
+
         rows_html = Enum.map_join(data_rows, "", fn row ->
           cells = String.split(row, "|") |> Enum.map(&String.trim/1)
           cells_html = Enum.map_join(cells, "", fn cell ->
@@ -721,29 +799,32 @@ defmodule Paperform2web.HtmlGenerator do
           end)
           "<tr>#{cells_html}</tr>"
         end)
-        
+
         """
         <table class="#{css_classes}" style="#{inline_styles}">
             <thead><tr>#{header_html}</tr></thead>
             <tbody>#{rows_html}</tbody>
         </table>
         """
-        
+
       _ ->
         "<div class=\"table-error\">Invalid table format</div>"
     end
   end
 
   defp generate_form_input(content, css_classes, inline_styles, section) do
-    input_type = get_in(section, ["metadata", "input_type"]) || infer_field_type(content)
+    input_type =
+      get_in(section, ["metadata", "input_type"]) ||
+      get_in(section, ["metadata", "field_type"]) ||
+      infer_field_type(content)
     field_name = get_in(section, ["metadata", "field_name"]) || sanitize_field_name(content)
     field_value = get_in(section, ["metadata", "field_value"]) || ""
     placeholder = get_in(section, ["metadata", "placeholder"]) || extract_placeholder(content)
     required = get_in(section, ["metadata", "required"]) || false
     options = get_in(section, ["metadata", "options"]) || []
-    
+
     required_attr = if required, do: " required", else: ""
-    
+
     case input_type do
       "checkbox" ->
         # Create unique checkbox ID
@@ -756,7 +837,7 @@ defmodule Paperform2web.HtmlGenerator do
             <label for="#{checkbox_id}">#{escape_html(content)}</label>
         </div>
         """
-        
+
       "radio" ->
         # Create unique ID but use same name for radio group
         radio_id = "#{field_name}_#{sanitize_field_name(field_value != "" && field_value || content)}"
@@ -767,14 +848,15 @@ defmodule Paperform2web.HtmlGenerator do
             <label for="#{radio_id}">#{escape_html(content)}</label>
         </div>
         """
-        
+
       "textarea" ->
         """
         <div class="form-field #{css_classes}" style="#{inline_styles}">
+            <label for="#{field_name}">#{escape_html(content)}</label>
             <textarea id="#{field_name}" name="#{field_name}" placeholder="#{escape_html(placeholder)}" rows="4"#{required_attr}>#{escape_html(field_value)}</textarea>
         </div>
         """
-        
+
       "select" ->
         options_html = if Enum.empty?(options) do
           "<option value=\"\">Select an option</option>"
@@ -786,28 +868,32 @@ defmodule Paperform2web.HtmlGenerator do
         end
         """
         <div class="form-field #{css_classes}" style="#{inline_styles}">
+            <label for="#{field_name}">#{escape_html(content)}</label>
             <select id="#{field_name}" name="#{field_name}"#{required_attr}>#{options_html}</select>
         </div>
         """
-        
+
       input_type when input_type in ["date", "time", "datetime-local", "email", "tel", "url", "number", "password"] ->
         """
         <div class="form-field #{css_classes}" style="#{inline_styles}">
+            <label for="#{field_name}">#{escape_html(content)}</label>
             <input type="#{input_type}" id="#{field_name}" name="#{field_name}" value="#{escape_html(field_value)}" placeholder="#{escape_html(placeholder)}"#{required_attr}>
         </div>
         """
-        
+
       "text" ->
         """
         <div class="form-field #{css_classes}" style="#{inline_styles}">
+            <label for="#{field_name}">#{escape_html(content)}</label>
             <input type="text" id="#{field_name}" name="#{field_name}" value="#{escape_html(field_value)}" placeholder="#{escape_html(placeholder)}"#{required_attr}>
         </div>
         """
-        
+
       _ ->
         # Force create a text input even for unknown types - NO STATIC CONTENT
         """
         <div class="form-field #{css_classes}" style="#{inline_styles}">
+            <label for="#{field_name}">#{escape_html(content)}</label>
             <input type="text" id="#{field_name}" name="#{field_name}" value="#{escape_html(field_value || content)}" placeholder="Enter value"#{required_attr}>
         </div>
         """
@@ -837,7 +923,7 @@ defmodule Paperform2web.HtmlGenerator do
     field_type = get_in(section, ["metadata", "field_type"]) || infer_field_type(content)
     field_name = get_in(section, ["metadata", "field_name"]) || sanitize_field_name(content)
     field_value = get_in(section, ["metadata", "field_value"]) || ""
-    
+
     case field_type do
       "checkbox" ->
         checked = if String.contains?(String.downcase(content), "checked") or field_value == "true", do: "checked", else: ""
@@ -847,7 +933,7 @@ defmodule Paperform2web.HtmlGenerator do
             <label for="#{field_name}">#{escape_html(content)}</label>
         </div>
         """
-        
+
       "radio" ->
         """
         <div class="form-field #{css_classes}" style="#{inline_styles}">
@@ -855,7 +941,7 @@ defmodule Paperform2web.HtmlGenerator do
             <label for="#{field_name}">#{escape_html(content)}</label>
         </div>
         """
-        
+
       "textarea" ->
         """
         <div class="form-field #{css_classes}" style="#{inline_styles}">
@@ -863,7 +949,7 @@ defmodule Paperform2web.HtmlGenerator do
             <textarea id="#{field_name}" name="#{field_name}" placeholder="#{escape_html(content)}" rows="4">#{escape_html(field_value)}</textarea>
         </div>
         """
-        
+
       "select" ->
         options = get_in(section, ["metadata", "options"]) || []
         options_html = Enum.map_join(options, "", fn option ->
@@ -876,7 +962,7 @@ defmodule Paperform2web.HtmlGenerator do
             <select id="#{field_name}" name="#{field_name}">#{options_html}</select>
         </div>
         """
-        
+
       field_type when field_type in ["date", "time", "datetime-local", "email", "tel", "url", "number", "password"] ->
         """
         <div class="form-field #{css_classes}" style="#{inline_styles}">
@@ -884,7 +970,7 @@ defmodule Paperform2web.HtmlGenerator do
             <input type="#{field_type}" id="#{field_name}" name="#{field_name}" value="#{escape_html(field_value)}" placeholder="#{escape_html(content)}">
         </div>
         """
-        
+
       "text" ->
         """
         <div class="form-field #{css_classes}" style="#{inline_styles}">
@@ -892,7 +978,7 @@ defmodule Paperform2web.HtmlGenerator do
             <input type="text" id="#{field_name}" name="#{field_name}" value="#{escape_html(field_value)}" placeholder="#{escape_html(content)}">
         </div>
         """
-        
+
       _ ->
         # Fallback for unknown types - just display as text
         """
@@ -911,7 +997,7 @@ defmodule Paperform2web.HtmlGenerator do
       confidence = if metadata, do: metadata["confidence"] || 0, else: 0
       language = if metadata, do: metadata["language"] || "Unknown", else: "Unknown"
       notes = if metadata, do: metadata["processing_notes"] || "", else: ""
-      
+
       """
       <footer class="document-metadata">
           <h3>Document Information</h3>
@@ -934,16 +1020,16 @@ defmodule Paperform2web.HtmlGenerator do
 
   defp build_css_classes(type, formatting) do
     classes = ["section", "section-#{type}"]
-    
+
     classes = if formatting["bold"], do: ["bold" | classes], else: classes
     classes = if formatting["italic"], do: ["italic" | classes], else: classes
-    
+
     font_size = formatting["font_size"]
     classes = if font_size, do: ["font-#{font_size}" | classes], else: classes
-    
+
     alignment = formatting["alignment"]
     classes = if alignment, do: ["align-#{alignment}" | classes], else: classes
-    
+
     Enum.join(classes, " ")
   end
 
@@ -968,7 +1054,7 @@ defmodule Paperform2web.HtmlGenerator do
 
   defp infer_field_type(content) do
     content_lower = String.downcase(content)
-    
+
     cond do
       String.contains?(content_lower, "email") -> "email"
       String.contains?(content_lower, "phone") or String.contains?(content_lower, "tel") -> "tel"
@@ -1003,7 +1089,7 @@ defmodule Paperform2web.HtmlGenerator do
     |> String.replace("\"", "&quot;")
     |> String.replace("'", "&#39;")
   end
-  
+
   defp escape_html(text), do: to_string(text) |> escape_html()
 
   defp generate_css(theme) do
@@ -1059,7 +1145,7 @@ defmodule Paperform2web.HtmlGenerator do
 
     base_css <> full_width_css
   end
-  
+
 
   defp default_css do
     """
@@ -1326,6 +1412,12 @@ defmodule Paperform2web.HtmlGenerator do
 
             // Initialize edit mode button
             initializeEditButton();
+
+            // Initialize share button
+            initializeShareButton();
+
+            // Initialize form submission
+            initializeFormSubmission();
         });
 
         function initializeThemeSelector() {
@@ -1366,8 +1458,475 @@ defmodule Paperform2web.HtmlGenerator do
             });
         }
 
+        function initializeShareButton() {
+            const shareBtn = document.getElementById('share-form');
+            if (!shareBtn) return;
+
+            shareBtn.addEventListener('click', function() {
+                openShareDialog();
+            });
+        }
+
+        function openShareDialog() {
+            if (!window.documentId) {
+                alert('Document ID not available');
+                return;
+            }
+
+            // Create share modal HTML
+            const modalHtml = `
+                <div id="share-modal" class="share-modal-overlay">
+                    <div class="share-modal">
+                        <div class="share-modal-header">
+                            <h3>Share Form</h3>
+                            <button class="share-close-btn" onclick="closeShareDialog()">&times;</button>
+                        </div>
+                        <div class="share-modal-body">
+                            <form id="share-form">
+                                <div class="form-group">
+                                    <label for="recipient-email">Recipient Email *</label>
+                                    <input type="email" id="recipient-email" required placeholder="Enter email address">
+                                </div>
+                                <div class="form-group">
+                                    <label for="recipient-name">Recipient Name</label>
+                                    <input type="text" id="recipient-name" placeholder="Enter recipient name">
+                                </div>
+                                <div class="form-group">
+                                    <label for="email-subject">Email Subject *</label>
+                                    <input type="text" id="email-subject" required value="You've been invited to fill out a form">
+                                </div>
+                                <div class="form-group">
+                                    <label for="email-message">Personal Message</label>
+                                    <textarea id="email-message" rows="4" placeholder="Add a personal message..."></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label for="expires-at">Expiration Date</label>
+                                    <input type="datetime-local" id="expires-at">
+                                    <small>Leave blank for no expiration</small>
+                                </div>
+                                <div id="share-error" class="error-message" style="display:none;"></div>
+                                <div id="share-success" class="success-message" style="display:none;"></div>
+                            </form>
+                        </div>
+                        <div class="share-modal-footer">
+                            <button type="button" onclick="closeShareDialog()" class="btn btn-secondary">Cancel</button>
+                            <button type="button" onclick="submitShare()" class="btn btn-primary" id="share-submit-btn">
+                                Send Form
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Add modal to page
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+            // Add modal styles
+            addShareModalStyles();
+        }
+
+        function closeShareDialog() {
+            const modal = document.getElementById('share-modal');
+            if (modal) {
+                modal.remove();
+            }
+        }
+
+        function submitShare() {
+            const form = document.getElementById('share-form');
+            const submitBtn = document.getElementById('share-submit-btn');
+            const errorDiv = document.getElementById('share-error');
+            const successDiv = document.getElementById('share-success');
+
+            // Get form values
+            const recipientEmail = document.getElementById('recipient-email').value;
+            const recipientName = document.getElementById('recipient-name').value;
+            const subject = document.getElementById('email-subject').value;
+            const message = document.getElementById('email-message').value;
+            const expiresAt = document.getElementById('expires-at').value;
+
+            // Validation
+            if (!recipientEmail || !subject) {
+                showError('Please fill in all required fields');
+                return;
+            }
+
+            // Show loading state
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="loading-spinner"></span> Sending...';
+
+            // Prepare data
+            const shareData = {
+                recipient_email: recipientEmail,
+                recipient_name: recipientName,
+                subject: subject,
+                message: message,
+                expires_at: expiresAt || null
+            };
+
+            // Send request
+            fetch(\`/api/documents/\${window.documentId}/share\`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(shareData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                showSuccess('Form shared successfully! The recipient will receive an email shortly.');
+                setTimeout(() => {
+                    closeShareDialog();
+                }, 2000);
+            })
+            .catch(error => {
+                showError(error.message || 'Failed to share form. Please try again.');
+            })
+            .finally(() => {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = 'Send Form';
+            });
+
+            function showError(message) {
+                errorDiv.textContent = message;
+                errorDiv.style.display = 'block';
+                successDiv.style.display = 'none';
+            }
+
+            function showSuccess(message) {
+                successDiv.textContent = message;
+                successDiv.style.display = 'block';
+                errorDiv.style.display = 'none';
+            }
+        }
+
+        function addShareModalStyles() {
+            if (document.getElementById('share-modal-styles')) return;
+
+            const styles = \`
+                <style id="share-modal-styles">
+                    .share-modal-overlay {
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background-color: rgba(0, 0, 0, 0.5);
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        z-index: 1000;
+                    }
+                    .share-modal {
+                        background: white;
+                        border-radius: 12px;
+                        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+                        width: 90%;
+                        max-width: 500px;
+                        max-height: 90vh;
+                        overflow-y: auto;
+                    }
+                    .share-modal-header {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        padding: 1.5rem;
+                        border-bottom: 1px solid #e5e7eb;
+                    }
+                    .share-modal-header h3 {
+                        margin: 0;
+                        font-size: 1.25rem;
+                        font-weight: 600;
+                        color: #111827;
+                    }
+                    .share-close-btn {
+                        background: none;
+                        border: none;
+                        font-size: 1.5rem;
+                        cursor: pointer;
+                        color: #6b7280;
+                        padding: 0.25rem;
+                        border-radius: 0.375rem;
+                    }
+                    .share-close-btn:hover {
+                        background-color: #f3f4f6;
+                        color: #111827;
+                    }
+                    .share-modal-body {
+                        padding: 1.5rem;
+                    }
+                    .form-group {
+                        margin-bottom: 1rem;
+                    }
+                    .form-group label {
+                        display: block;
+                        margin-bottom: 0.5rem;
+                        font-weight: 500;
+                        color: #374151;
+                    }
+                    .form-group input,
+                    .form-group textarea {
+                        width: 100%;
+                        padding: 0.75rem;
+                        border: 1px solid #d1d5db;
+                        border-radius: 0.375rem;
+                        font-size: 0.875rem;
+                        box-sizing: border-box;
+                    }
+                    .form-group input:focus,
+                    .form-group textarea:focus {
+                        outline: none;
+                        border-color: #3b82f6;
+                        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+                    }
+                    .form-group small {
+                        display: block;
+                        margin-top: 0.25rem;
+                        color: #6b7280;
+                        font-size: 0.75rem;
+                    }
+                    .share-modal-footer {
+                        display: flex;
+                        justify-content: flex-end;
+                        gap: 0.75rem;
+                        padding: 1.5rem;
+                        border-top: 1px solid #e5e7eb;
+                        background-color: #f9fafb;
+                    }
+                    .error-message {
+                        background-color: #fef2f2;
+                        border: 1px solid #fecaca;
+                        color: #dc2626;
+                        padding: 0.75rem;
+                        border-radius: 0.375rem;
+                        margin-top: 1rem;
+                    }
+                    .success-message {
+                        background-color: #f0fdf4;
+                        border: 1px solid #bbf7d0;
+                        color: #166534;
+                        padding: 0.75rem;
+                        border-radius: 0.375rem;
+                        margin-top: 1rem;
+                    }
+                    .loading-spinner {
+                        display: inline-block;
+                        width: 1rem;
+                        height: 1rem;
+                        border: 2px solid #ffffff;
+                        border-top: 2px solid transparent;
+                        border-radius: 50%;
+                        animation: spin 1s linear infinite;
+                    }
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                </style>
+            \`;
+            document.head.insertAdjacentHTML('beforeend', styles);
+        }
+
+        function initializeFormSubmission() {
+            const submitBtn = document.getElementById('submit-form');
+            if (!submitBtn) return;
+
+            submitBtn.addEventListener('click', function() {
+                submitForm();
+            });
+        }
+
+        function submitForm() {
+            const form = document.getElementById('document-form');
+            const submitBtn = document.getElementById('submit-form');
+            const statusDiv = document.getElementById('form-status');
+
+            if (!form) {
+                showFormStatus('error', 'Form not found');
+                return;
+            }
+
+            // Collect form data
+            const formData = collectFormData(form);
+
+            // Check if this is a shared form or regular preview
+            const shareToken = form.dataset.shareToken;
+            const documentId = form.dataset.documentId;
+
+            // Show loading state
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="loading-spinner"></span> Submitting...';
+            showFormStatus('loading', 'Submitting your response...');
+
+            // Determine endpoint
+            let endpoint, payload;
+            if (shareToken) {
+                // Shared form submission
+                endpoint = \`/api/share/\${shareToken}/response\`;
+                payload = {
+                    response_data: {
+                        form_data: formData,
+                        is_completed: true,
+                        completion_time_seconds: calculateCompletionTime()
+                    }
+                };
+            } else {
+                // Test submission for preview mode
+                endpoint = \`/api/documents/\${documentId}/test-submission\`;
+                payload = {
+                    form_data: formData,
+                    is_completed: true
+                };
+            }
+
+            // Submit form
+            fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                showFormStatus('success', 'Form submitted successfully! Thank you for your response.');
+
+                // Disable form fields to prevent resubmission
+                disableFormFields(form);
+            })
+            .catch(error => {
+                console.error('Form submission error:', error);
+                showFormStatus('error', error.message || 'Failed to submit form. Please try again.');
+            })
+            .finally(() => {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '📝 Submit Form';
+            });
+        }
+
+        function collectFormData(form) {
+            const formData = {};
+            const formFields = form.querySelectorAll('input, textarea, select');
+
+            formFields.forEach(field => {
+                if (!field.name || field.name === '') return;
+
+                const fieldType = field.type || field.tagName.toLowerCase();
+                const fieldValue = getFieldValue(field);
+
+                if (fieldValue !== null) {
+                    // Store field data with metadata
+                    formData[field.name] = {
+                        type: fieldType,
+                        value: fieldValue,
+                        label: getFieldLabel(field),
+                        required: field.hasAttribute('required')
+                    };
+                }
+            });
+
+            return formData;
+        }
+
+        function getFieldValue(field) {
+            const fieldType = field.type || field.tagName.toLowerCase();
+
+            switch (fieldType) {
+                case 'checkbox':
+                    return field.checked ? (field.value || 'true') : null;
+                case 'radio':
+                    return field.checked ? field.value : null;
+                case 'select':
+                case 'select-one':
+                    return field.value || null;
+                case 'select-multiple':
+                    const selectedOptions = Array.from(field.selectedOptions);
+                    return selectedOptions.length > 0 ? selectedOptions.map(opt => opt.value) : null;
+                default:
+                    return field.value.trim() || null;
+            }
+        }
+
+        function getFieldLabel(field) {
+            // Try to find associated label
+            const label = document.querySelector(\`label[for="\${field.id}"]\`);
+            if (label) {
+                return label.textContent.trim();
+            }
+
+            // Try to find parent label
+            const parentLabel = field.closest('label');
+            if (parentLabel) {
+                return parentLabel.textContent.replace(field.value, '').trim();
+            }
+
+            // Fallback to field name
+            return field.name || field.placeholder || 'Unknown field';
+        }
+
+        function showFormStatus(type, message) {
+            const statusDiv = document.getElementById('form-status');
+            if (!statusDiv) return;
+
+            statusDiv.className = \`form-status \${type}\`;
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+        }
+
+        function disableFormFields(form) {
+            const formFields = form.querySelectorAll('input, textarea, select');
+            formFields.forEach(field => {
+                field.disabled = true;
+            });
+        }
+
+        function calculateCompletionTime() {
+            // Simple completion time calculation
+            // In a real app, you'd track when the user started filling the form
+            return Math.floor(Math.random() * 300) + 60; // Random 1-6 minutes for demo
+        }
+
     </script>
     """
+  end
+
+  defp generate_form_wrapper(content_html, document_id, options) do
+    is_shared = Map.get(options, :shared, false)
+    share_token = Map.get(options, :share_token)
+
+    if is_shared and share_token do
+      # For shared forms, use the share token endpoint
+      """
+      <form id="document-form" data-share-token="#{share_token}">
+          #{content_html}
+          <div class="form-submit-section">
+              <button type="button" id="submit-form" class="btn btn-primary btn-large">
+                  📝 Submit Form
+              </button>
+              <div id="form-status" class="form-status" style="display:none;"></div>
+          </div>
+      </form>
+      """
+    else
+      # For regular preview, create a test submission
+      """
+      <form id="document-form" data-document-id="#{document_id}">
+          #{content_html}
+          <div class="form-submit-section">
+              <button type="button" id="submit-form" class="btn btn-primary btn-large">
+                  📝 Submit Form (Test)
+              </button>
+              <div id="form-status" class="form-status" style="display:none;"></div>
+          </div>
+      </form>
+      """
+    end
   end
 
   defp generate_style_selector do
@@ -1394,6 +1953,7 @@ defmodule Paperform2web.HtmlGenerator do
         <div class="toolbar-content">
             <h3>Form Preview</h3>
             <div class="toolbar-actions">
+                <button id="share-form" class="btn btn-primary">Share Form</button>
                 <button id="switch-to-edit" class="btn btn-secondary">Edit</button>
                 #{generate_style_selector()}
             </div>
@@ -1442,7 +2002,7 @@ defmodule Paperform2web.HtmlGenerator do
         .preview-mode {
             padding-top: 5rem;
         }
-        
+
         .toolbar-content {
             max-width: 1200px;
             margin: 0 auto;
@@ -1450,12 +2010,12 @@ defmodule Paperform2web.HtmlGenerator do
             justify-content: space-between;
             align-items: center;
         }
-        
+
         .toolbar-actions {
             display: flex;
             gap: 0.5rem;
         }
-        
+
         .btn {
             padding: 0.6rem 1.2rem;
             border: 1px solid transparent;
@@ -1468,7 +2028,7 @@ defmodule Paperform2web.HtmlGenerator do
             align-items: center;
             gap: 0.5rem;
         }
-        
+
         .btn-primary {
             background: #3b82f6;
             color: white;
@@ -1541,20 +2101,20 @@ defmodule Paperform2web.HtmlGenerator do
             padding: 0.5rem;
         }
 
-        
-        .btn:hover { 
-            transform: translateY(-1px); 
+
+        .btn:hover {
+            transform: translateY(-1px);
             box-shadow: 0 2px 6px rgba(0,0,0,0.15);
             filter: brightness(1.1);
         }
-        
+
         .btn:active {
             transform: translateY(0);
             box-shadow: 0 1px 3px rgba(0,0,0,0.2);
         }
-        
+
         .editing-mode .container { margin-top: 80px; }
-        
+
         .editable-field-wrapper {
             position: relative;
             margin-bottom: 1.5rem;
@@ -1563,19 +2123,19 @@ defmodule Paperform2web.HtmlGenerator do
             border-radius: 8px;
             transition: all 0.2s ease;
         }
-        
-        
+
+
         .editable-field-wrapper:hover {
             border-color: #3498db;
             background: rgba(52, 152, 219, 0.05);
         }
-        
+
         .editable-field-wrapper.dragging {
             transform: rotate(2deg);
             box-shadow: 0 8px 25px rgba(0,0,0,0.15);
             z-index: 100;
         }
-        
+
         .drag-handle {
             position: absolute;
             left: -10px;
@@ -1593,20 +2153,20 @@ defmodule Paperform2web.HtmlGenerator do
             opacity: 0;
             transition: opacity 0.2s ease;
         }
-        
+
         .editable-field-wrapper:hover .drag-handle {
             opacity: 1;
         }
-        
+
         .drag-handle:active { cursor: grabbing; }
-        
+
         .drag-handle::before {
             content: "⋮⋮";
             font-size: 12px;
             line-height: 1;
             letter-spacing: -2px;
         }
-        
+
         .field-controls {
             position: absolute;
             top: -10px;
@@ -1617,12 +2177,12 @@ defmodule Paperform2web.HtmlGenerator do
             transition: opacity 0.2s ease;
             z-index: 50;
         }
-        
+
         .editable-field-wrapper:hover .field-controls {
             opacity: 1;
         }
-        
-        
+
+
         .control-btn {
             width: 28px;
             height: 28px;
@@ -1638,7 +2198,7 @@ defmodule Paperform2web.HtmlGenerator do
             transition: all 0.15s ease;
             box-shadow: 0 1px 2px rgba(0,0,0,0.05);
         }
-        
+
         .remove-btn {
             background: #f8f9fa;
             color: #6c757d;
@@ -1660,7 +2220,7 @@ defmodule Paperform2web.HtmlGenerator do
             color: #495057;
             border-color: #adb5bd;
         }
-        
+
         .editable-label {
             background: rgba(241, 196, 15, 0.2);
             padding: 2px 4px;
@@ -1668,16 +2228,16 @@ defmodule Paperform2web.HtmlGenerator do
             cursor: text;
             transition: background-color 0.2s ease;
         }
-        
+
         .editable-label:hover {
             background: rgba(241, 196, 15, 0.3);
         }
-        
+
         .editable-label:focus {
             outline: 2px solid #f1c40f;
             background: rgba(241, 196, 15, 0.4);
         }
-        
+
         .add-field-zone {
             border: 2px dashed #bdc3c7;
             border-radius: 8px;
@@ -1687,12 +2247,12 @@ defmodule Paperform2web.HtmlGenerator do
             cursor: pointer;
             transition: all 0.2s ease;
         }
-        
+
         .add-field-zone:hover {
             border-color: #3498db;
             background: rgba(52, 152, 219, 0.05);
         }
-        
+
         .drop-zone {
             border: 2px dashed #3498db;
             background: rgba(52, 152, 219, 0.1);
@@ -1703,11 +2263,11 @@ defmodule Paperform2web.HtmlGenerator do
             opacity: 0;
             transition: all 0.2s ease;
         }
-        
+
         .drop-zone.active {
             opacity: 1;
         }
-        
+
         #save-status {
             position: fixed;
             top: 90px;
@@ -1719,19 +2279,19 @@ defmodule Paperform2web.HtmlGenerator do
             transition: opacity 0.3s ease;
             z-index: 999;
         }
-        
+
         #save-status.success {
             background: #27ae60;
             color: white;
             opacity: 1;
         }
-        
+
         #save-status.error {
             background: #e74c3c;
             color: white;
             opacity: 1;
         }
-        
+
         /* Field Edit Dialog */
         .field-edit-modal {
             position: fixed;
@@ -1774,7 +2334,7 @@ defmodule Paperform2web.HtmlGenerator do
         .field-edit-modal.active .field-edit-dialog {
             transform: translateX(0);
         }
-        
+
         .field-edit-header {
             display: flex;
             align-items: center;
@@ -1816,7 +2376,7 @@ defmodule Paperform2web.HtmlGenerator do
             overflow-y: auto;
             max-height: calc(100vh - 220px);
         }
-        
+
         .field-edit-close {
             background: rgba(255, 255, 255, 0.2);
             border: none;
@@ -1837,25 +2397,25 @@ defmodule Paperform2web.HtmlGenerator do
             background: rgba(255, 255, 255, 0.3);
             transform: scale(1.1);
         }
-        
+
         .field-edit-form {
             display: flex;
             flex-direction: column;
             gap: 1.5rem;
         }
-        
+
         .field-group {
             display: flex;
             flex-direction: column;
             gap: 0.5rem;
         }
-        
+
         .field-group label {
             font-weight: 600;
             color: #34495e;
             font-size: 0.9rem;
         }
-        
+
         .field-group input,
         .field-group select,
         .field-group textarea {
@@ -1865,7 +2425,7 @@ defmodule Paperform2web.HtmlGenerator do
             font-size: 1rem;
             transition: border-color 0.2s ease;
         }
-        
+
         .field-group input:focus,
         .field-group select:focus,
         .field-group textarea:focus {
@@ -1873,14 +2433,14 @@ defmodule Paperform2web.HtmlGenerator do
             border-color: #3498db;
             box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
         }
-        
+
         .field-options-container {
             border: 2px solid #e9ecef;
             border-radius: 8px;
             padding: 1rem;
             background: #f8f9fa;
         }
-        
+
         .field-options-list {
             list-style: none;
             padding: 0;
@@ -1889,20 +2449,20 @@ defmodule Paperform2web.HtmlGenerator do
             flex-direction: column;
             gap: 0.5rem;
         }
-        
+
         .field-option-item {
             display: flex;
             align-items: center;
             gap: 0.5rem;
         }
-        
+
         .field-option-input {
             flex: 1;
             padding: 0.5rem;
             border: 1px solid #ddd;
             border-radius: 4px;
         }
-        
+
         .remove-option-btn {
             background: #fef2f2;
             color: #dc2626;
@@ -1913,13 +2473,13 @@ defmodule Paperform2web.HtmlGenerator do
             font-size: 0.8rem;
             transition: all 0.15s ease;
         }
-        
+
         .remove-option-btn:hover {
             background: #fecaca;
             color: #b91c1c;
             border-color: #f87171;
         }
-        
+
         .add-option-btn {
             background: #f0fdf4;
             color: #059669;
@@ -1931,13 +2491,13 @@ defmodule Paperform2web.HtmlGenerator do
             margin-top: 0.5rem;
             transition: all 0.15s ease;
         }
-        
+
         .add-option-btn:hover {
             background: #dcfce7;
             color: #047857;
             border-color: #86efac;
         }
-        
+
         .field-edit-actions {
             display: flex;
             gap: 1rem;
@@ -1945,7 +2505,7 @@ defmodule Paperform2web.HtmlGenerator do
             padding-top: 1rem;
             border-top: 2px solid #f0f0f0;
         }
-        
+
         .field-edit-btn {
             padding: 0.75rem 1.5rem;
             border: 1px solid transparent;
@@ -1958,31 +2518,31 @@ defmodule Paperform2web.HtmlGenerator do
             align-items: center;
             gap: 0.5rem;
         }
-        
+
         .field-edit-btn.cancel {
             background: #f9fafb;
             color: #374151;
             border-color: #d1d5db;
         }
-        
+
         .field-edit-btn.cancel:hover {
             background: #f3f4f6;
             border-color: #9ca3af;
         }
-        
+
         .field-edit-btn.save {
             background: #059669;
             color: white;
             border-color: #059669;
         }
-        
+
         .field-edit-btn.save:hover {
             background: #047857;
             border-color: #047857;
             transform: translateY(-1px);
             box-shadow: 0 2px 6px rgba(0,0,0,0.15);
         }
-        
+
         /* Add Field Dialog */
         .add-field-modal {
             position: fixed;
@@ -2025,7 +2585,7 @@ defmodule Paperform2web.HtmlGenerator do
         .add-field-modal.active .add-field-dialog {
             transform: translateX(0);
         }
-        
+
         .add-field-header {
             display: flex;
             align-items: center;
@@ -2067,7 +2627,7 @@ defmodule Paperform2web.HtmlGenerator do
             overflow-y: auto;
             max-height: calc(100vh - 220px);
         }
-        
+
         .field-type-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
@@ -2194,19 +2754,19 @@ defmodule Paperform2web.HtmlGenerator do
             transform: translateY(-1px);
             box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
         }
-        
+
         .field-type-icon {
             font-size: 2rem;
             margin-bottom: 0.5rem;
             display: block;
         }
-        
+
         .field-type-name {
             font-weight: 600;
             color: #374151;
             font-size: 0.9rem;
         }
-        
+
         /* Drop Zones for field insertion */
         .field-drop-zone {
             height: 12px;
@@ -2219,7 +2779,7 @@ defmodule Paperform2web.HtmlGenerator do
             position: relative;
             cursor: pointer;
         }
-        
+
         .field-drop-zone::before {
             content: "Click to insert field here";
             position: absolute;
@@ -2236,34 +2796,34 @@ defmodule Paperform2web.HtmlGenerator do
             transition: opacity 0.2s ease;
             border: 1px solid rgba(59, 130, 246, 0.2);
         }
-        
+
         .field-drop-zone:hover {
             opacity: 1;
             background: rgba(59, 130, 246, 0.1);
             border-color: #3b82f6;
             height: 24px;
         }
-        
+
         .field-drop-zone:hover::before {
             opacity: 1;
         }
-        
+
         .field-drop-zone.active {
             opacity: 1;
             height: 40px;
             background: rgba(59, 130, 246, 0.1);
             border-color: #3b82f6;
         }
-        
+
         .field-drop-zone.active::before {
             opacity: 1;
         }
-        
+
         .field-drop-zone.drag-over {
             background: rgba(59, 130, 246, 0.2);
             border-color: #1d4ed8;
         }
-        
+
         /* Editable title styling */
         .editable-title {
             position: relative;
@@ -2273,18 +2833,18 @@ defmodule Paperform2web.HtmlGenerator do
             transition: all 0.2s ease;
             outline: none;
         }
-        
+
         .editable-title:hover {
             border-color: rgba(59, 130, 246, 0.3);
             background-color: rgba(59, 130, 246, 0.05);
         }
-        
+
         .editable-title:focus {
             border-color: #3b82f6;
             background-color: rgba(59, 130, 246, 0.1);
             box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
         }
-        
+
         .editable-title::before {
             content: "Click to edit title";
             position: absolute;
@@ -2302,11 +2862,11 @@ defmodule Paperform2web.HtmlGenerator do
             transition: opacity 0.2s ease;
             z-index: 1000;
         }
-        
+
         .editable-title:hover::before {
             opacity: 1;
         }
-        
+
         .editable-title:focus::before {
             opacity: 0;
         }
@@ -2322,26 +2882,26 @@ defmodule Paperform2web.HtmlGenerator do
             transition: all 0.3s ease;
             margin: 2rem 0;
         }
-        
+
         .add-field-zone:hover {
             background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
             border-color: #3b82f6;
             transform: translateY(-2px);
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
         }
-        
+
         .add-field-zone h3 {
             color: #475569;
             font-size: 1.1rem;
             margin: 0 0 0.5rem 0;
         }
-        
+
         .add-field-zone p {
             color: #64748b;
             margin: 0;
             font-size: 0.9rem;
         }
-        
+
         /* Two-Column Visual Layout for Editing */
         .column-layout-container {
             background: #f8fafc;
@@ -2352,7 +2912,7 @@ defmodule Paperform2web.HtmlGenerator do
             min-height: 200px;
             position: relative;
         }
-        
+
         .column-layout-header {
             text-align: center;
             margin-bottom: 1rem;
@@ -2360,14 +2920,14 @@ defmodule Paperform2web.HtmlGenerator do
             color: #6b7280;
             font-weight: 500;
         }
-        
+
         .two-column-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 1.5rem;
             min-height: 150px;
         }
-        
+
         .column-drop-zone {
             border: 2px dashed #e5e7eb;
             border-radius: 8px;
@@ -2377,7 +2937,7 @@ defmodule Paperform2web.HtmlGenerator do
             transition: all 0.2s ease;
             min-height: 100px;
         }
-        
+
         .column-drop-zone::before {
             content: attr(data-column-label);
             position: absolute;
@@ -2389,27 +2949,27 @@ defmodule Paperform2web.HtmlGenerator do
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
-        
+
         .column-drop-zone.drag-over {
             border-color: #3b82f6;
             background: rgba(59, 130, 246, 0.1);
         }
-        
+
         .column-drop-zone.has-fields {
             border-style: solid;
             border-color: #d1d5db;
             background: white;
         }
-        
+
         .column-field {
             margin-bottom: 0.75rem;
             position: relative;
         }
-        
+
         .column-field:last-child {
             margin-bottom: 0;
         }
-        
+
         .column-add-field {
             border: 2px dashed #cbd5e1;
             border-radius: 6px;
@@ -2422,32 +2982,32 @@ defmodule Paperform2web.HtmlGenerator do
             color: #6b7280;
             font-size: 14px;
         }
-        
+
         .column-add-field:hover {
             border-color: #3b82f6;
             background: rgba(59, 130, 246, 0.05);
             color: #3b82f6;
             transform: translateY(-1px);
         }
-        
+
         .column-add-field .add-field-icon {
             display: block;
             font-size: 18px;
             margin-bottom: 4px;
         }
-        
+
         .column-add-field .add-field-text {
             font-size: 12px;
             font-weight: 500;
         }
-        
+
         /* Hide add field buttons when column has no fields */
         .column-drop-zone:not(.has-fields) .column-add-field {
             border-style: solid;
             border-color: #e5e7eb;
             background: rgba(255, 255, 255, 0.8);
         }
-        
+
         .column-toggle-btn {
             position: absolute;
             top: 10px;
@@ -2463,12 +3023,12 @@ defmodule Paperform2web.HtmlGenerator do
             z-index: 100;
             font-weight: 500;
         }
-        
+
         .column-toggle-btn:hover {
             background: #2563eb;
             transform: scale(1.05);
         }
-        
+
         /* Hide regular field layout when column layout is active */
         .editable-content.column-layout-active > .editable-field-wrapper {
             display: none !important;
@@ -2529,6 +3089,62 @@ defmodule Paperform2web.HtmlGenerator do
             margin: 0;
             font-weight: normal;
             flex: 1;
+        }
+
+        /* Form Submission Styles */
+        .form-submit-section {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            border-top: 2px solid #e5e7eb;
+            text-align: center;
+        }
+
+        .btn-large {
+            padding: 1rem 2rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+            min-width: 200px;
+        }
+
+        .form-status {
+            margin-top: 1rem;
+            padding: 1rem;
+            border-radius: 8px;
+            font-weight: 500;
+        }
+
+        .form-status.success {
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            color: #166534;
+        }
+
+        .form-status.error {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #dc2626;
+        }
+
+        .form-status.loading {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            color: #1d4ed8;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid #ffffff;
+            border-top: 2px solid transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 0.5rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
 
     </style>
@@ -2775,43 +3391,43 @@ defmodule Paperform2web.HtmlGenerator do
         let isEditingMode = true;
         let draggedElement = null;
         let formData = [];
-        
+
         document.addEventListener('DOMContentLoaded', function() {
             initializeFormEditor();
         });
-        
+
         function initializeFormEditor() {
             // Ensure clean state at startup
             isColumnLayoutActive = false;
             window.targetColumn = null;
             window.insertionIndex = null;
-            
+
             // Initialize drag and drop
             initializeDragDrop();
-            
+
             // Initialize toolbar buttons
             initializeToolbarButtons();
-            
+
             // Initialize label editing
             initializeLabelEditing();
-            
+
             // Initialize field controls
             initializeFieldControls();
-            
+
             // Initialize title editing
             initializeTitleEditing();
-            
+
             // Load initial form data
             loadFormData();
-            
+
             // Show save status element
             const statusDiv = document.createElement('div');
             statusDiv.id = 'save-status';
             document.body.appendChild(statusDiv);
-            
+
             // Create field edit modal
             createFieldEditModal();
-            
+
             // Create add field modal
             createAddFieldModal();
 
@@ -2841,7 +3457,7 @@ defmodule Paperform2web.HtmlGenerator do
                     editDialog.style.maxHeight = 'calc(100vh - ' + (toolbarHeight + 40) + 'px)';
                 }
             };
-            
+
             // Clean up any existing drop zones and initialize fresh
             cleanupAllDropZones();
             initializeDropZones();
@@ -2857,10 +3473,10 @@ defmodule Paperform2web.HtmlGenerator do
             // Initial document content class update
             updateDocumentContentClass();
         }
-        
+
         function initializeDragDrop() {
             const fields = document.querySelectorAll('.editable-field-wrapper');
-            
+
             fields.forEach((field, index) => {
                 field.addEventListener('dragstart', handleDragStart);
                 field.addEventListener('dragend', handleDragEnd);
@@ -2868,30 +3484,30 @@ defmodule Paperform2web.HtmlGenerator do
                 field.addEventListener('drop', handleDrop);
             });
         }
-        
+
         function handleDragStart(e) {
             draggedElement = e.target;
             e.target.classList.add('dragging');
             e.dataTransfer.effectAllowed = 'move';
         }
-        
+
         function handleDragEnd(e) {
             e.target.classList.remove('dragging');
             if (!isColumnLayoutActive) {
                 document.querySelectorAll('.drop-zone').forEach(zone => zone.remove());
             }
         }
-        
+
         function handleDragOver(e) {
             e.preventDefault();
             e.dataTransfer.dropEffect = 'move';
-            
+
             // Show drop zones only if not in column layout
             if (!isColumnLayoutActive && !document.querySelector('.drop-zone')) {
                 createDropZones();
             }
         }
-        
+
         function handleDrop(e) {
             e.preventDefault();
             if (draggedElement && draggedElement !== e.target) {
@@ -2933,7 +3549,7 @@ defmodule Paperform2web.HtmlGenerator do
                 }, 2000);
             }
         }
-        
+
         function createDropZones() {
             if (isColumnLayoutActive) return;
             const fields = document.querySelectorAll('.editable-field-wrapper');
@@ -2944,7 +3560,7 @@ defmodule Paperform2web.HtmlGenerator do
                 field.parentNode.insertBefore(dropZone, field);
             });
         }
-        
+
         function initializeToolbarButtons() {
             // Toggle edit mode (switch to preview)
             const toggleEditBtn = document.getElementById('toggle-edit');
@@ -2979,7 +3595,7 @@ defmodule Paperform2web.HtmlGenerator do
                 addFieldZone.addEventListener('click', addNewField);
             }
         }
-        
+
         function initializeLabelEditing() {
             document.addEventListener('blur', function(e) {
                 if (e.target.classList.contains('editable-label')) {
@@ -2989,7 +3605,7 @@ defmodule Paperform2web.HtmlGenerator do
                     updateFormData();
                 }
             }, true);
-            
+
             document.addEventListener('keydown', function(e) {
                 if (e.target.classList.contains('editable-label') && e.key === 'Enter') {
                     e.preventDefault();
@@ -2997,14 +3613,14 @@ defmodule Paperform2web.HtmlGenerator do
                 }
             });
         }
-        
+
         function initializeTitleEditing() {
             const titleElement = document.querySelector('.editable-title');
             if (!titleElement) return;
-            
+
             // Store original title
             const originalTitle = titleElement.getAttribute('data-original-title');
-            
+
             // Handle focus event - select all text
             titleElement.addEventListener('focus', function() {
                 // Select all text when focused
@@ -3014,19 +3630,19 @@ defmodule Paperform2web.HtmlGenerator do
                 selection.removeAllRanges();
                 selection.addRange(range);
             });
-            
+
             // Handle blur event - save changes
             titleElement.addEventListener('blur', function() {
                 const newTitle = this.textContent.trim() || 'Document';
                 this.textContent = newTitle;
-                
+
                 // Only save if title actually changed
                 if (newTitle !== originalTitle) {
                     saveTitleChange(newTitle);
                     this.setAttribute('data-original-title', newTitle);
                 }
             });
-            
+
             // Handle Enter key - save and blur
             titleElement.addEventListener('keydown', function(e) {
                 if (e.key === 'Enter') {
@@ -3038,7 +3654,7 @@ defmodule Paperform2web.HtmlGenerator do
                     this.blur();
                 }
             });
-            
+
             // Prevent line breaks
             titleElement.addEventListener('paste', function(e) {
                 e.preventDefault();
@@ -3047,13 +3663,13 @@ defmodule Paperform2web.HtmlGenerator do
                 document.execCommand('insertText', false, cleanText);
             });
         }
-        
+
         async function saveTitleChange(newTitle) {
             const saveStatus = document.getElementById('save-status');
             saveStatus.textContent = 'Saving title...';
             saveStatus.className = '';
             saveStatus.style.opacity = '1';
-            
+
             try {
                 const response = await fetch(`/api/documents/#{document_id}/title`, {
                     method: 'PATCH',
@@ -3064,14 +3680,14 @@ defmodule Paperform2web.HtmlGenerator do
                         title: newTitle
                     })
                 });
-                
+
                 if (response.ok) {
                     saveStatus.textContent = '✓ Title saved successfully!';
                     saveStatus.className = 'success';
                     setTimeout(() => {
                         saveStatus.style.opacity = '0';
                     }, 3000);
-                    
+
                     // Update page title as well
                     document.title = newTitle;
                 } else {
@@ -3086,7 +3702,7 @@ defmodule Paperform2web.HtmlGenerator do
                 }, 5000);
             }
         }
-        
+
         function initializeFieldControls() {
             document.addEventListener('click', function(e) {
                 if (e.target.classList.contains('remove-btn')) {
@@ -3096,23 +3712,23 @@ defmodule Paperform2web.HtmlGenerator do
                 }
             });
         }
-        
+
         function removeField(fieldWrapper) {
             if (confirm('Are you sure you want to remove this field?')) {
                 fieldWrapper.remove();
                 updateFormData();
-                
+
                 // Refresh drop zones after removal (only if not in column mode)
                 if (!isColumnLayoutActive) {
                     addDropZonesBetweenFields();
                 }
             }
         }
-        
+
         function changeFieldType(fieldWrapper) {
             openFieldEditDialog(fieldWrapper);
         }
-        
+
         function createFieldEditModal() {
             const modalHTML = \`
                 <div id="field-edit-modal" class="field-edit-modal">
@@ -3128,7 +3744,7 @@ defmodule Paperform2web.HtmlGenerator do
                                 <label for="field-label">Field Label</label>
                                 <input type="text" id="field-label" name="label" required>
                             </div>
-                            
+
                             <div class="field-group">
                                 <label for="field-type">Field Type</label>
                                 <select id="field-type" name="type" onchange="handleFieldTypeChange()">
@@ -3140,18 +3756,18 @@ defmodule Paperform2web.HtmlGenerator do
                                     <option value="checkbox">Checkbox</option>
                                 </select>
                             </div>
-                            
+
                             <div class="field-group" id="field-placeholder-group">
                                 <label for="field-placeholder">Placeholder Text</label>
                                 <input type="text" id="field-placeholder" name="placeholder">
                             </div>
-                            
+
                             <div class="field-group" id="field-required-group">
                                 <label>
                                     <input type="checkbox" id="field-required" name="required"> Required Field
                                 </label>
                             </div>
-                            
+
                             <div class="field-group" id="field-options-group" style="display: none;">
                                 <label id="field-options-label">Options</label>
                                 <div class="field-options-container">
@@ -3159,7 +3775,7 @@ defmodule Paperform2web.HtmlGenerator do
                                     <button type="button" class="add-option-btn" onclick="addOption()">+ Add Option</button>
                                 </div>
                             </div>
-                            
+
                                 <div class="field-edit-actions">
                                     <button type="button" class="field-edit-btn cancel" onclick="closeFieldEditDialog()">Cancel</button>
                                     <button type="submit" class="field-edit-btn save">Save Changes</button>
@@ -3169,10 +3785,10 @@ defmodule Paperform2web.HtmlGenerator do
                     </div>
                 </div>
             \`;
-            
+
             document.body.insertAdjacentHTML('beforeend', modalHTML);
         }
-        
+
         function openFieldEditDialog(fieldWrapper) {
             window.currentEditingField = fieldWrapper;
             const modal = document.getElementById('field-edit-modal');
@@ -3192,19 +3808,19 @@ defmodule Paperform2web.HtmlGenerator do
             // Show modal
             modal.classList.add('active');
         }
-        
+
         function closeFieldEditDialog() {
             const modal = document.getElementById('field-edit-modal');
             modal.classList.remove('active');
             window.currentEditingField = null;
         }
-        
+
         function handleFieldTypeChange() {
             const type = document.getElementById('field-type').value;
             const placeholderGroup = document.getElementById('field-placeholder-group');
             const optionsGroup = document.getElementById('field-options-group');
             const requiredGroup = document.getElementById('field-required-group');
-            
+
             // Show/hide fields based on type
             if (type === 'select') {
                 placeholderGroup.style.display = 'none';
@@ -3224,22 +3840,22 @@ defmodule Paperform2web.HtmlGenerator do
                 optionsGroup.style.display = 'none';
             }
         }
-        
+
         function populateOptions() {
             const optionsList = document.getElementById('field-options-list');
             optionsList.innerHTML = '';
-            
+
             // Add default options or existing ones
             const defaultOptions = ['Option 1', 'Option 2', 'Option 3'];
             defaultOptions.forEach(option => {
                 addOptionToList(option);
             });
         }
-        
+
         function addOption() {
             addOptionToList('New Option');
         }
-        
+
         function addOptionToList(value = '') {
             const optionsList = document.getElementById('field-options-list');
             const optionItem = document.createElement('li');
@@ -3250,7 +3866,7 @@ defmodule Paperform2web.HtmlGenerator do
             \`;
             optionsList.appendChild(optionItem);
         }
-        
+
         function removeOption(button) {
             button.parentElement.remove();
         }
@@ -3303,35 +3919,35 @@ defmodule Paperform2web.HtmlGenerator do
 
         function saveFieldChanges(event) {
             event.preventDefault();
-            
+
             if (!window.currentEditingField) return;
-            
+
             const label = document.getElementById('field-label').value.trim();
             const type = document.getElementById('field-type').value;
-            
+
             if (!label) {
                 alert('Field label is required');
                 return;
             }
-            
+
             // Update field label
             const labelElement = window.currentEditingField.querySelector('.editable-label');
             if (labelElement) {
                 labelElement.textContent = label;
             }
-            
+
             // Update field type
             window.currentEditingField.setAttribute('data-type', type);
-            
+
             // Regenerate field HTML based on new type
             regenerateFieldHTML(window.currentEditingField, label, type);
-            
+
             // Update form data
             updateFormData();
-            
+
             // Close dialog
             closeFieldEditDialog();
-            
+
             // Show success message
             const saveStatus = document.getElementById('save-status');
             saveStatus.textContent = '✓ Field updated successfully!';
@@ -3341,13 +3957,13 @@ defmodule Paperform2web.HtmlGenerator do
                 saveStatus.style.opacity = '0';
             }, 2000);
         }
-        
+
         function regenerateFieldHTML(fieldWrapper, label, type) {
             const fieldName = fieldWrapper.getAttribute('data-index') || 'field_new';
             const isHalfWidth = fieldWrapper.classList.contains('half-width');
-            
+
             let newHTML = '';
-            
+
             switch(type) {
                 case 'textarea':
                     newHTML = \`
@@ -3391,7 +4007,7 @@ defmodule Paperform2web.HtmlGenerator do
                         .filter(value => value)
                         .map(option => \`<option value="\${option}">\${option}</option>\`)
                         .join('');
-                    
+
                     newHTML = \`
                         <label class="editable-label" contenteditable="true" data-field="\${fieldName}">\${label}</label>
                         <select id="\${fieldName}" name="\${fieldName}">\${options}</select>
@@ -3415,25 +4031,25 @@ defmodule Paperform2web.HtmlGenerator do
                         <input type="text" id="\${fieldName}" name="\${fieldName}" placeholder="\${label}" />
                     \`;
             }
-            
+
             // Find the form content area and replace it
             const existingContent = fieldWrapper.querySelector('.editable-label')?.parentElement || fieldWrapper;
             const controlsElement = fieldWrapper.querySelector('.field-controls');
             const dragHandle = fieldWrapper.querySelector('.drag-handle');
-            
+
             // Clear and rebuild field content
             fieldWrapper.innerHTML = '';
             if (dragHandle) fieldWrapper.appendChild(dragHandle);
             if (controlsElement) fieldWrapper.appendChild(controlsElement);
             fieldWrapper.insertAdjacentHTML('beforeend', newHTML);
-            
+
             // Restore width class if needed
             if (isHalfWidth) {
                 fieldWrapper.classList.add('half-width');
             }
         }
-        
-        
+
+
         function addNewField() {
             window.insertionIndex = null; // Insert at end
             openAddFieldDialog();
@@ -3460,7 +4076,7 @@ defmodule Paperform2web.HtmlGenerator do
 
             openEditFieldDialog(currentType, currentLabel, currentOptions, isHalfWidth);
         }
-        
+
         function createAddFieldModal() {
             const modalHTML = \`
                 <div id="add-field-modal" class="add-field-modal">
@@ -3475,36 +4091,36 @@ defmodule Paperform2web.HtmlGenerator do
                             <label>Field Label</label>
                             <input type="text" id="new-field-label" placeholder="Enter field label" value="New Field">
                         </div>
-                        
+
                         <div class="field-group">
                             <label>Choose Field Type</label>
                             <div class="field-type-grid">
                                 <div class="field-type-option selected" data-type="text">
-                                    <span class="field-type-icon">📝</span>
+                                    <span class="field-type-icon">T</span>
                                     <div class="field-type-name">Text Input</div>
                                 </div>
                                 <div class="field-type-option" data-type="textarea">
-                                    <span class="field-type-icon">📄</span>
+                                    <span class="field-type-icon">¶</span>
                                     <div class="field-type-name">Textarea</div>
                                 </div>
                                 <div class="field-type-option" data-type="email">
-                                    <span class="field-type-icon">📧</span>
+                                    <span class="field-type-icon">@</span>
                                     <div class="field-type-name">Email</div>
                                 </div>
                                 <div class="field-type-option" data-type="date">
-                                    <span class="field-type-icon">📅</span>
+                                    <span class="field-type-icon">D</span>
                                     <div class="field-type-name">Date</div>
                                 </div>
                                 <div class="field-type-option" data-type="select">
-                                    <span class="field-type-icon">📋</span>
+                                    <span class="field-type-icon">▼</span>
                                     <div class="field-type-name">Dropdown</div>
                                 </div>
                                 <div class="field-type-option" data-type="checkbox">
-                                    <span class="field-type-icon">☑️</span>
+                                    <span class="field-type-icon">☑</span>
                                     <div class="field-type-name">Checkbox</div>
                                 </div>
                                 <div class="field-type-option" data-type="radio">
-                                    <span class="field-type-icon">🔘</span>
+                                    <span class="field-type-icon">○</span>
                                     <div class="field-type-name">Radio Button</div>
                                 </div>
                             </div>
@@ -3526,9 +4142,9 @@ defmodule Paperform2web.HtmlGenerator do
                     </div>
                 </div>
             \`;
-            
+
             document.body.insertAdjacentHTML('beforeend', modalHTML);
-            
+
             // Add click handlers for field type selection
             document.querySelectorAll('.field-type-option').forEach(option => {
                 option.addEventListener('click', function() {
@@ -3539,7 +4155,7 @@ defmodule Paperform2web.HtmlGenerator do
                 });
             });
         }
-        
+
         function openAddFieldDialog() {
             const modal = document.getElementById('add-field-modal');
             modal.classList.add('active');
@@ -3563,7 +4179,7 @@ defmodule Paperform2web.HtmlGenerator do
                 };
             }, 100);
         }
-        
+
         function closeAddFieldDialog() {
             const modal = document.getElementById('add-field-modal');
             modal.classList.remove('active');
@@ -3631,31 +4247,31 @@ defmodule Paperform2web.HtmlGenerator do
                                 <label>Choose Field Type</label>
                                 <div class="field-type-grid">
                                     <div class="field-type-option edit-field-type-option" data-type="text">
-                                        <span class="field-type-icon">📝</span>
+                                        <span class="field-type-icon">T</span>
                                         <div class="field-type-name">Text Input</div>
                                     </div>
                                     <div class="field-type-option edit-field-type-option" data-type="textarea">
-                                        <span class="field-type-icon">📄</span>
+                                        <span class="field-type-icon">¶</span>
                                         <div class="field-type-name">Textarea</div>
                                     </div>
                                     <div class="field-type-option edit-field-type-option" data-type="email">
-                                        <span class="field-type-icon">📧</span>
+                                        <span class="field-type-icon">@</span>
                                         <div class="field-type-name">Email</div>
                                     </div>
                                     <div class="field-type-option edit-field-type-option" data-type="date">
-                                        <span class="field-type-icon">📅</span>
+                                        <span class="field-type-icon">D</span>
                                         <div class="field-type-name">Date</div>
                                     </div>
                                     <div class="field-type-option edit-field-type-option" data-type="select">
-                                        <span class="field-type-icon">📋</span>
+                                        <span class="field-type-icon">▼</span>
                                         <div class="field-type-name">Dropdown</div>
                                     </div>
                                     <div class="field-type-option edit-field-type-option" data-type="checkbox">
-                                        <span class="field-type-icon">☑️</span>
+                                        <span class="field-type-icon">☑</span>
                                         <div class="field-type-name">Checkbox</div>
                                     </div>
                                     <div class="field-type-option edit-field-type-option" data-type="radio">
-                                        <span class="field-type-icon">🔘</span>
+                                        <span class="field-type-icon">○</span>
                                         <div class="field-type-name">Radio Button</div>
                                     </div>
                                 </div>
@@ -3875,7 +4491,7 @@ defmodule Paperform2web.HtmlGenerator do
             // Re-initialize field listeners
             initializeFieldListeners();
         }
-        
+
         function createNewField() {
             const fieldLabel = document.getElementById('new-field-label').value.trim() || 'New Field';
             const selectedType = document.querySelector('.field-type-option.selected');
@@ -3890,28 +4506,28 @@ defmodule Paperform2web.HtmlGenerator do
                 // Create field for column layout - generate unique ID based on timestamp
                 const newIndex = Date.now();
                 const fieldHTML = generateNewFieldHTML(fieldType, fieldLabel, newIndex);
-                
+
                 // Convert to column field format
                 const tempDiv = document.createElement('div');
                 tempDiv.innerHTML = fieldHTML;
                 const field = tempDiv.firstElementChild;
                 field.classList.add('column-field');
-                
+
                 // Insert before add field button
                 column.insertBefore(field, addFieldBtn);
-                
+
                 // Update column states
                 updateColumnStates();
                 initializeColumnFieldListeners();
-                
+
                 // Clear target column
                 window.targetColumn = null;
-                
+
             } else if (!isColumnLayoutActive) {
                 // Regular field insertion for list mode - generate unique ID based on timestamp
                 const newIndex = Date.now();
                 const newFieldHTML = generateNewFieldHTML(fieldType, fieldLabel, newIndex);
-                
+
                 if (window.insertionIndex !== null) {
                     // Insert at specific position
                     insertFieldAtPosition(newFieldHTML, window.insertionIndex);
@@ -3922,7 +4538,7 @@ defmodule Paperform2web.HtmlGenerator do
                     const addZone = document.getElementById('add-field-zone');
                     addZone.insertAdjacentHTML('beforebegin', newFieldHTML);
                 }
-                
+
                 // Reinitialize all field functionality
                 initializeFieldListeners();
                 // Refresh drop zones (only if not in column mode)
@@ -3930,17 +4546,17 @@ defmodule Paperform2web.HtmlGenerator do
                     addDropZonesBetweenFields();
                 }
             }
-            
+
             // Reset form
             document.getElementById('new-field-label').value = '';
             document.querySelectorAll('.field-type-option').forEach(opt => opt.classList.remove('selected'));
             document.querySelector('.field-type-option[data-type="text"]').classList.add('selected');
             // Hide options section when resetting to text field
             document.getElementById('add-field-options-group').style.display = 'none';
-            
+
             updateFormData();
             closeAddFieldDialog();
-            
+
             // Show success message
             const saveStatus = document.getElementById('save-status');
             saveStatus.textContent = '✓ Field added successfully!';
@@ -3950,7 +4566,7 @@ defmodule Paperform2web.HtmlGenerator do
                 saveStatus.style.opacity = '0';
             }, 2000);
         }
-        
+
         function insertFieldAtPosition(fieldHTML, position) {
             const fields = document.querySelectorAll('.editable-field-wrapper');
             if (position < fields.length) {
@@ -3961,12 +4577,12 @@ defmodule Paperform2web.HtmlGenerator do
                 addZone.insertAdjacentHTML('beforebegin', fieldHTML);
             }
         }
-        
+
         function reindexFields() {
             const fields = document.querySelectorAll('.editable-field-wrapper');
             fields.forEach((field, index) => {
                 field.setAttribute('data-index', index);
-                
+
                 // Update field names and IDs
                 const fieldName = `field_${index}`;
                 const inputs = field.querySelectorAll('input, textarea, select');
@@ -3974,20 +4590,20 @@ defmodule Paperform2web.HtmlGenerator do
                     input.id = fieldName;
                     input.name = fieldName;
                 });
-                
+
                 // Update labels
                 const labels = field.querySelectorAll('label[for]');
                 labels.forEach(label => {
                     label.setAttribute('for', fieldName);
                 });
-                
+
                 const editableLabels = field.querySelectorAll('.editable-label[data-field]');
                 editableLabels.forEach(label => {
                     label.setAttribute('data-field', fieldName);
                 });
             });
         }
-        
+
         function initializeFieldListeners() {
             const fields = document.querySelectorAll('.editable-field-wrapper');
             fields.forEach(field => {
@@ -3996,18 +4612,18 @@ defmodule Paperform2web.HtmlGenerator do
                 field.removeEventListener('dragend', handleDragEnd);
                 field.removeEventListener('dragover', handleDragOver);
                 field.removeEventListener('drop', handleDrop);
-                
+
                 // Add drag and drop listeners
                 field.addEventListener('dragstart', handleDragStart);
                 field.addEventListener('dragend', handleDragEnd);
                 field.addEventListener('dragover', handleDragOver);
                 field.addEventListener('drop', handleDrop);
-                
+
                 // Initialize field control buttons
                 const widthBtn = field.querySelector('.width-btn');
                 const typeBtn = field.querySelector('.type-btn');
                 const removeBtn = field.querySelector('.remove-btn');
-                
+
                 if (widthBtn) {
                     widthBtn.removeEventListener('click', toggleFieldWidth);
                     widthBtn.addEventListener('click', (e) => {
@@ -4015,14 +4631,14 @@ defmodule Paperform2web.HtmlGenerator do
                         toggleFieldWidth(e);
                     });
                 }
-                
+
                 if (typeBtn) {
                     typeBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
                         editField(field);
                     });
                 }
-                
+
                 if (removeBtn) {
                     removeBtn.removeEventListener('click', removeField);
                     removeBtn.addEventListener('click', (e) => {
@@ -4032,11 +4648,11 @@ defmodule Paperform2web.HtmlGenerator do
                 }
             });
         }
-        
+
         function generateNewFieldHTML(type, label, index) {
             const fieldName = `field_${index}`;
             let formElement = '';
-            
+
             switch(type) {
                 case 'textarea':
                     formElement = `
@@ -4112,7 +4728,7 @@ defmodule Paperform2web.HtmlGenerator do
                         <input type="text" id="${fieldName}" name="${fieldName}" placeholder="${label}" />
                     `;
             }
-            
+
             return `
                 <div class="editable-field-wrapper form-field" data-index="user_field_${index}" data-type="${type}" draggable="true">
                     <div class="drag-handle"></div>
@@ -4124,7 +4740,7 @@ defmodule Paperform2web.HtmlGenerator do
                 </div>
             `;
         }
-        
+
         function loadFormData() {
             // First try to load user-added fields (those with user_field_ prefix in data-index)
             let fields = document.querySelectorAll('.editable-field-wrapper[data-index^="user_field_"]');
@@ -4480,8 +5096,8 @@ defmodule Paperform2web.HtmlGenerator do
                 return fieldData;
             });
         }
-        
-        
+
+
         async function saveFormChanges() {
             const saveStatus = document.getElementById('save-status');
             saveStatus.textContent = 'Saving...';
@@ -4504,7 +5120,7 @@ defmodule Paperform2web.HtmlGenerator do
                         form_fields: formData
                     })
                 });
-                
+
                 if (response.ok) {
                     saveStatus.textContent = '✓ Changes saved successfully!';
                     saveStatus.className = 'success';
@@ -4523,92 +5139,92 @@ defmodule Paperform2web.HtmlGenerator do
                 }, 5000);
             }
         }
-        
+
         function resetForm() {
             if (confirm('Are you sure you want to reset the form to its original state?')) {
                 location.reload();
             }
         }
-        
+
         function initializeDropZones() {
             addDropZonesBetweenFields();
         }
-        
+
         function addDropZonesBetweenFields() {
             // Don't add drop zones if column layout is active
             if (isColumnLayoutActive) {
                 console.log('Skipping drop zone creation - column layout is active');
                 return;
             }
-            
+
             // Ensure we're in the right context
             const editableContent = document.querySelector('.editable-content');
             if (!editableContent || editableContent.classList.contains('column-layout-active')) {
                 console.log('Skipping drop zone creation - not in list mode');
                 return;
             }
-            
+
             // Remove existing drop zones completely
             cleanupAllDropZones();
-            
+
             const fields = document.querySelectorAll('.editable-field-wrapper');
-            
+
             // Add drop zone before first field
             if (fields.length > 0) {
                 const firstDropZone = createDropZone(0);
                 fields[0].insertAdjacentHTML('beforebegin', firstDropZone);
             }
-            
+
             // Add drop zones between fields
             fields.forEach((field, index) => {
                 const dropZone = createDropZone(index + 1);
                 field.insertAdjacentHTML('afterend', dropZone);
             });
-            
+
             // Add event listeners to drop zones
             document.querySelectorAll('.field-drop-zone').forEach((zone, index) => {
                 zone.addEventListener('dragover', function(e) {
                     e.preventDefault();
                     this.classList.add('drag-over');
                 });
-                
+
                 zone.addEventListener('dragleave', function() {
                     this.classList.remove('drag-over');
                 });
-                
+
                 zone.addEventListener('drop', function(e) {
                     e.preventDefault();
                     this.classList.remove('drag-over');
                     // Handle field reordering here if needed
                 });
-                
+
                 zone.addEventListener('click', function() {
                     window.insertionIndex = parseInt(this.getAttribute('data-position'));
                     openAddFieldDialog();
                 });
             });
         }
-        
+
         function createDropZone(position) {
             return \`<div class="field-drop-zone" data-position="\${position}" title="Click to insert field here"></div>\`;
         }
-        
+
         function showDropZones() {
             if (isColumnLayoutActive) return;
             document.querySelectorAll('.field-drop-zone').forEach(zone => {
                 zone.classList.add('active');
             });
         }
-        
+
         function hideDropZones() {
             if (isColumnLayoutActive) return;
             document.querySelectorAll('.field-drop-zone').forEach(zone => {
                 zone.classList.remove('active', 'drag-over');
             });
         }
-        
+
         let isColumnLayoutActive = false;
-        
+
         function cleanupAllDropZones() {
             // Remove all types of drop zones
             document.querySelectorAll('.field-drop-zone').forEach(zone => {
@@ -4617,17 +5233,17 @@ defmodule Paperform2web.HtmlGenerator do
             document.querySelectorAll('.drop-zone').forEach(zone => {
                 zone.remove();
             });
-            
+
             // Force hide any remaining zones with inline styles
             document.querySelectorAll('[class*="drop-zone"]').forEach(zone => {
                 zone.style.display = 'none';
                 zone.remove();
             });
-            
+
             // Clear any active states
             hideDropZones();
         }
-        
+
         function toggleColumnLayout() {
             console.log('toggleColumnLayout called, isColumnLayoutActive:', isColumnLayoutActive);
             if (isColumnLayoutActive) {
@@ -4638,7 +5254,7 @@ defmodule Paperform2web.HtmlGenerator do
                 enterColumnLayout();
             }
         }
-        
+
         function enterColumnLayout() {
             console.log('Entering column layout mode');
             isColumnLayoutActive = true;
@@ -4711,10 +5327,10 @@ defmodule Paperform2web.HtmlGenerator do
                 // Initialize column drag and drop
                 initializeColumnDragDrop();
             }, 50);
-            
+
             // Update button text
-            document.getElementById('toggle-column-layout').innerHTML = '📄 List Layout';
-            
+            document.getElementById('toggle-column-layout').innerHTML = '¶ List Layout';
+
             // Show status
             const saveStatus = document.getElementById('save-status');
             saveStatus.textContent = 'Column layout activated - drag fields to organize in columns';
@@ -4724,26 +5340,26 @@ defmodule Paperform2web.HtmlGenerator do
                 saveStatus.style.opacity = '0';
             }, 4000);
         }
-        
+
         function exitColumnLayout() {
             isColumnLayoutActive = false;
-            
+
             // Complete cleanup before switching
             cleanupAllDropZones();
-            
+
             // Hide column layout container
             const columnContainer = document.getElementById('column-layout-container');
             columnContainer.style.display = 'none';
-            
+
             // Remove class to show regular layout
             document.querySelector('.editable-content').classList.remove('column-layout-active');
-            
+
             // Move fields back to regular layout
             restoreRegularLayout();
-            
+
             // Update button text
-            document.getElementById('toggle-column-layout').innerHTML = '📋 Column Layout';
-            
+            document.getElementById('toggle-column-layout').innerHTML = 'Column Layout';
+
             // Wait a frame before reinitializing to ensure DOM is ready
             setTimeout(() => {
                 // Reinitialize regular drag and drop
@@ -4751,7 +5367,7 @@ defmodule Paperform2web.HtmlGenerator do
                 addDropZonesBetweenFields();
             }, 10);
         }
-        
+
         function populateColumnLayout() {
             const fields = document.querySelectorAll('.editable-field-wrapper');
             const leftColumn = document.getElementById('column-left');
@@ -4768,16 +5384,16 @@ defmodule Paperform2web.HtmlGenerator do
 
             const leftAddBtn = leftAddBtnEl ? leftAddBtnEl.outerHTML : '<div class="column-add-field" data-column="left"><span class="add-field-icon">➕</span><span class="add-field-text">Add field to left column</span></div>';
             const rightAddBtn = rightAddBtnEl ? rightAddBtnEl.outerHTML : '<div class="column-add-field" data-column="right"><span class="add-field-icon">➕</span><span class="add-field-text">Add field to right column</span></div>';
-            
+
             leftColumn.innerHTML = '';
             rightColumn.innerHTML = '';
-            
+
             // Distribute fields to columns based on their current width setting
             fields.forEach((field, index) => {
                 const isHalfWidth = field.classList.contains('half-width');
                 const fieldClone = field.cloneNode(true);
                 fieldClone.classList.add('column-field');
-                
+
                 if (isHalfWidth) {
                     // Alternate half-width fields between columns
                     const halfWidthIndex = Array.from(document.querySelectorAll('.editable-field-wrapper.half-width')).indexOf(field);
@@ -4791,15 +5407,15 @@ defmodule Paperform2web.HtmlGenerator do
                     leftColumn.appendChild(fieldClone);
                 }
             });
-            
+
             // Restore add field buttons
             leftColumn.insertAdjacentHTML('beforeend', leftAddBtn);
             rightColumn.insertAdjacentHTML('beforeend', rightAddBtn);
-            
+
             // Update column visual states
             updateColumnStates();
         }
-        
+
         function restoreRegularLayout() {
             const leftColumn = document.getElementById('column-left');
             const rightColumn = document.getElementById('column-right');
@@ -4813,27 +5429,27 @@ defmodule Paperform2web.HtmlGenerator do
             // Get all fields from columns in order
             const leftFields = Array.from(leftColumn.querySelectorAll('.column-field'));
             const rightFields = Array.from(rightColumn.querySelectorAll('.column-field'));
-            
+
             // Remove existing fields from regular layout
             const existingFields = document.querySelectorAll('.editable-content > .editable-field-wrapper');
             existingFields.forEach(field => field.remove());
-            
+
             // Add fields back in the correct order, alternating between left and right
             const maxLength = Math.max(leftFields.length, rightFields.length);
             const addFieldZone = document.getElementById('add-field-zone');
-            
+
             for (let i = 0; i < maxLength; i++) {
                 if (leftFields[i]) {
                     const field = leftFields[i].cloneNode(true);
                     field.classList.remove('column-field');
-                    
+
                     // If there's a corresponding right field, make both half-width
                     if (rightFields[i]) {
                         field.classList.add('half-width');
                     } else {
                         field.classList.remove('half-width');
                     }
-                    
+
                     addFieldZone.parentNode.insertBefore(field, addFieldZone);
                 }
                 if (rightFields[i]) {
@@ -4843,12 +5459,12 @@ defmodule Paperform2web.HtmlGenerator do
                     addFieldZone.parentNode.insertBefore(field, addFieldZone);
                 }
             }
-            
+
             // Clear columns
             leftColumn.innerHTML = '';
             rightColumn.innerHTML = '';
         }
-        
+
         function initializeColumnDragDrop() {
             const leftColumn = document.getElementById('column-left');
             const rightColumn = document.getElementById('column-right');
@@ -4864,37 +5480,37 @@ defmodule Paperform2web.HtmlGenerator do
                     e.preventDefault();
                     this.classList.add('drag-over');
                 });
-                
+
                 column.addEventListener('dragleave', function(e) {
                     if (!this.contains(e.relatedTarget)) {
                         this.classList.remove('drag-over');
                     }
                 });
-                
+
                 column.addEventListener('drop', function(e) {
                     e.preventDefault();
                     this.classList.remove('drag-over');
-                    
+
                     if (draggedElement) {
                         // Move field to this column
                         const fieldClone = draggedElement.cloneNode(true);
                         fieldClone.classList.add('column-field');
-                        
+
                         // Insert before the add field button
                         const addFieldBtn = this.querySelector('.column-add-field');
                         this.insertBefore(fieldClone, addFieldBtn);
-                        
+
                         // Remove from original location
                         if (draggedElement.parentNode.classList.contains('column-drop-zone')) {
                             draggedElement.remove();
                         }
-                        
+
                         updateColumnStates();
                         initializeColumnFieldListeners();
                     }
                 });
             });
-            
+
             // Initialize add field buttons
             document.querySelectorAll('.column-add-field').forEach(btn => {
                 btn.addEventListener('click', function(e) {
@@ -4904,11 +5520,11 @@ defmodule Paperform2web.HtmlGenerator do
                     openAddFieldDialog();
                 });
             });
-            
+
             // Initialize field listeners in columns
             initializeColumnFieldListeners();
         }
-        
+
         function initializeColumnFieldListeners() {
             const columnFields = document.querySelectorAll('.column-field');
             columnFields.forEach(field => {
@@ -4923,25 +5539,25 @@ defmodule Paperform2web.HtmlGenerator do
                 });
             });
         }
-        
+
         function updateColumnStates() {
             const leftColumn = document.getElementById('column-left');
             const rightColumn = document.getElementById('column-right');
-            
+
             // Update visual states based on content
             if (leftColumn.children.length > 0) {
                 leftColumn.classList.add('has-fields');
             } else {
                 leftColumn.classList.remove('has-fields');
             }
-            
+
             if (rightColumn.children.length > 0) {
                 rightColumn.classList.add('has-fields');
             } else {
                 rightColumn.classList.remove('has-fields');
             }
         }
-        
+
         function togglePreviewMode() {
             // Remove editing toolbar and switch to regular view
             const url = new URL(window.location);

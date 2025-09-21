@@ -14,6 +14,9 @@ defmodule Paperform2webWeb.Router do
       patch "/theme", DocumentController, :update_theme
       patch "/form_structure", DocumentController, :update_form_structure
       patch "/title", DocumentController, :update_title
+      post "/share", DocumentController, :create_share
+      get "/shares", DocumentController, :list_shares
+      post "/test-submission", DocumentController, :test_submission
     end
     
     post "/upload", DocumentController, :upload
@@ -21,6 +24,11 @@ defmodule Paperform2webWeb.Router do
     # Templates endpoint
     get "/templates", DocumentController, :list_templates
     
+    # Shared form access (public endpoints)
+    get "/share/:token", DocumentController, :view_shared_form
+    post "/share/:token/response", DocumentController, :submit_form_response
+    get "/share/:token/analytics", DocumentController, :view_share_analytics
+
     # Authentication and health check endpoints
     get "/auth/status", AuthController, :auth_status
     get "/auth/test", AuthController, :test_connection
