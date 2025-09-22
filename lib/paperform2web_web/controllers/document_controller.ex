@@ -121,6 +121,56 @@ defmodule Paperform2webWeb.DocumentController do
     end
   end
 
+  def update(conn, %{"id" => id} = params) do
+    document = Documents.get_document!(id)
+
+    # Handle different update scenarios based on what data is provided
+    cond do
+      # If both title and form_data are provided (from editing mode)
+      Map.has_key?(params, "title") and Map.has_key?(params, "form_data") ->
+        with {:ok, updated_document} <- Documents.update_document_title(document, params["title"]),
+             {:ok, final_document} <- Documents.update_form_structure(updated_document, params["form_data"]) do
+          conn
+          |> render(:show, document: final_document)
+        else
+          {:error, changeset} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{errors: changeset})
+        end
+
+      # If only title is provided
+      Map.has_key?(params, "title") ->
+        case Documents.update_document_title(document, params["title"]) do
+          {:ok, updated_document} ->
+            conn
+            |> render(:show, document: updated_document)
+          {:error, changeset} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{errors: changeset})
+        end
+
+      # If only form_data is provided
+      Map.has_key?(params, "form_data") ->
+        case Documents.update_form_structure(document, params["form_data"]) do
+          {:ok, updated_document} ->
+            conn
+            |> render(:show, document: updated_document)
+          {:error, changeset} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{errors: changeset})
+        end
+
+      # If neither title nor form_data is provided, return error
+      true ->
+        conn
+        |> put_status(:bad_request)
+        |> json(%{error: "No valid update data provided"})
+    end
+  end
+
   def delete(conn, %{"id" => id}) do
     document = Documents.get_document!(id)
 

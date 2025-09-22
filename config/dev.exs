@@ -80,9 +80,7 @@ config :paperform2web, :ollama_url, "https://openrouter.ai/api/v1"
 config :paperform2web, :ollama_auth, %{
   type: :api_key,
   # For API key auth:
-   api_key: System.get_env("OLLAMA_API_KEY"),
-
-  # For Bearer token auth:
+   api_key: ""
   # token: "your-bearer-token",
 
   # For Basic auth:
@@ -92,3 +90,6 @@ config :paperform2web, :ollama_auth, %{
 
 # Configure upload directory
 config :paperform2web, :upload_directory, "uploads/"
+
+# Enable debug logging for radio buttons to track rendering issues
+config :paperform2web, :debug_radio_buttons, true

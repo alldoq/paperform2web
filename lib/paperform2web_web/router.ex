@@ -8,7 +8,7 @@ defmodule Paperform2webWeb.Router do
   scope "/api", Paperform2webWeb do
     pipe_through :api
     
-    resources "/documents", DocumentController, only: [:index, :show, :delete] do
+    resources "/documents", DocumentController, only: [:index, :show, :delete, :update] do
       get "/status", DocumentController, :process_status
       get "/html", DocumentController, :html_output
       patch "/theme", DocumentController, :update_theme

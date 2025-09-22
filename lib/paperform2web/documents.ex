@@ -171,10 +171,29 @@ defmodule Paperform2web.Documents do
     IO.puts("🔧 BACKEND DEBUG: Final unique field IDs: #{Enum.map(unique_form_fields, &(&1["id"])) |> inspect()}")
 
     new_form_sections = Enum.with_index(unique_form_fields, fn field, index ->
+      # Handle both old and new data structure formats
+      field_type = get_field_type(field)
+      field_content = get_field_content(field)
+      field_metadata = get_field_metadata(field)
+      field_id = field["id"] || field["form_field_id"] || "field_#{index}"
+
+      # Debug logging for radio fields
+      if field_type == "radio" do
+        IO.puts("📻 BACKEND PROCESSING RADIO FIELD:")
+        IO.puts("  Field: #{inspect(field)}")
+        IO.puts("  Type: #{field_type}")
+        IO.puts("  Content: #{field_content}")
+        IO.puts("  Metadata: #{inspect(field_metadata)}")
+      end
+
       %{
-        "type" => determine_section_type(field["fieldType"]),
-        "content" => field["label"],
-        "metadata" => build_field_metadata(field),
+        "type" => "form_input",  # Always use form_input for user-added fields
+        "content" => field_content,
+        "metadata" => Map.merge(field_metadata, %{
+          "input_type" => field_type,
+          "field_name" => get_in(field, ["metadata", "field_name"]) || field["fieldName"] || sanitize_field_name(field_content),
+          "required" => get_in(field, ["metadata", "required"]) || field["required"] || false
+        }),
         "formatting" => %{
           "alignment" => "left",
           "font_size" => "medium",
@@ -183,7 +202,7 @@ defmodule Paperform2web.Documents do
           "width" => field["width"] || "full"
         },
         "position" => %{"x" => 0, "y" => index * 50, "width" => 400, "height" => 30},
-        "form_field_id" => field["id"]  # Mark as user-added form field
+        "form_field_id" => field_id  # Mark as user-added form field
       }
     end)
 
@@ -275,6 +294,57 @@ defmodule Paperform2web.Documents do
         Map.put(base_metadata, "checked", false)
       _ ->
         base_metadata
+    end
+  end
+
+  # Helper functions to extract field data from different structures
+  defp get_field_type(field) do
+    # Try different possible locations for field type
+    get_in(field, ["metadata", "input_type"]) ||  # New structure from JS
+    field["fieldType"] ||                         # Old structure
+    field["type"] ||                              # Alternative
+    "text"                                        # Default fallback
+  end
+
+  defp get_field_content(field) do
+    # Try different possible locations for field content/label
+    field["content"] ||                           # New structure from JS
+    field["label"] ||                             # Old structure
+    field["title"] ||                             # Alternative
+    "Untitled Field"                              # Default fallback
+  end
+
+  defp get_field_metadata(field) do
+    # Extract existing metadata or create empty map
+    existing_metadata = field["metadata"] || %{}
+
+    # Add options for select/radio fields if not already present
+    field_type = get_field_type(field)
+    case field_type do
+      "select" ->
+        # Check for options in metadata first, then fallback to field level, then default
+        options = existing_metadata["options"] || field["options"] || ["Option 1", "Option 2", "Option 3"]
+        Map.put(existing_metadata, "options", options)
+      "radio" ->
+        # Check for options in metadata first, then fallback to field level, then default
+        options = existing_metadata["options"] || field["options"] || ["Option 1", "Option 2", "Option 3"]
+        Map.put(existing_metadata, "options", options)
+      "checkbox" ->
+        Map.put_new(existing_metadata, "checked", false)
+      _ ->
+        existing_metadata
+    end
+  end
+
+  defp sanitize_field_name(content) do
+    content
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9_]/, "_")
+    |> String.replace(~r/_+/, "_")
+    |> String.trim("_")
+    |> case do
+      "" -> "field"
+      name -> name
     end
   end
 
