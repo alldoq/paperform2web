@@ -80,7 +80,9 @@ config :paperform2web, :ollama_url, "https://openrouter.ai/api/v1"
 config :paperform2web, :ollama_auth, %{
   type: :api_key,
   # For API key auth:
-   api_key: ""
+   api_key: "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",
+
+  # For Bearer token auth:
   # token: "your-bearer-token",
 
   # For Basic auth:

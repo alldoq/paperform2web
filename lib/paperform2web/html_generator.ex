@@ -88,23 +88,24 @@ defmodule Paperform2web.HtmlGenerator do
     ContentGeneration.generate_content(
       content,
       editing_mode,
-      &form_generation_bridge/3,
+      fn type, section, index -> form_generation_bridge(type, section, index, editing_mode) end,
       &FormGeneration.group_radio_sections/1,
       &generate_editable_section_bridge/2
     )
   end
 
   # Bridge functions for module communication
-  defp form_generation_bridge(:section, section, index) do
-    FormGeneration.generate_form_section(section, index, &build_css_classes/2, &build_inline_styles/2, &ContentGeneration.escape_html/1)
+  defp form_generation_bridge(:section, section, index, editing_mode) do
+    FormGeneration.generate_form_section(section, index, &build_css_classes/2, &build_inline_styles/2, &ContentGeneration.escape_html/1, editing_mode)
   end
 
-  defp form_generation_bridge(:radio_group, section_group, index) do
-    generate_form_radio_group(section_group, index)
+  defp form_generation_bridge(:radio_group, section_group, index, editing_mode) do
+    generate_form_radio_group(section_group, index, editing_mode)
   end
 
-  defp form_generation_bridge(:radio_fieldset, section_group, index) do
-    FormGeneration.generate_radio_fieldset(section_group, index)
+  defp form_generation_bridge(:radio_fieldset, section_group, index, editing_mode) do
+    # For now, fallback to radio_group since we haven't implemented generate_radio_fieldset yet
+    generate_form_radio_group(section_group, index, editing_mode)
   end
 
   defp generate_editable_section_bridge(section, index) do
@@ -112,7 +113,7 @@ defmodule Paperform2web.HtmlGenerator do
   end
 
   # Still need these functions that haven't been fully extracted yet
-  defp generate_form_radio_group(radio_sections, index) do
+  defp generate_form_radio_group(radio_sections, index, editing_mode \\ false) do
     if is_list(radio_sections) and length(radio_sections) > 1 do
       # This is a group of radio sections
       [first_section | radio_inputs] = radio_sections
@@ -130,7 +131,7 @@ defmodule Paperform2web.HtmlGenerator do
       radio_buttons = Enum.map_join(radio_inputs, "", fn section ->
         # Ensure the section has the correct field_name for the radio group
         section_with_field_name = put_in(section, ["metadata", "field_name"], field_name)
-        FormGeneration.generate_form_input(section["content"], "", "", section_with_field_name, &ContentGeneration.escape_html/1)
+        FormGeneration.generate_form_input(section["content"], "", "", section_with_field_name, &ContentGeneration.escape_html/1, editing_mode)
       end)
 
       """
@@ -144,7 +145,7 @@ defmodule Paperform2web.HtmlGenerator do
     else
       # Single section, treat as regular form section
       section = if is_list(radio_sections), do: List.first(radio_sections), else: radio_sections
-      FormGeneration.generate_form_section(section, index, &build_css_classes/2, &build_inline_styles/2, &ContentGeneration.escape_html/1)
+      FormGeneration.generate_form_section(section, index, &build_css_classes/2, &build_inline_styles/2, &ContentGeneration.escape_html/1, editing_mode)
     end
   end
 
@@ -166,7 +167,7 @@ defmodule Paperform2web.HtmlGenerator do
         <button class="field-control-btn edit-btn" onclick="editField('#{field_id}')" title="Edit field">✏️</button>
         <button class="field-control-btn delete-btn" onclick="deleteField('#{field_id}')" title="Delete field">🗑️</button>
       </div>
-      #{FormGeneration.generate_form_section(section, index, &build_css_classes/2, &build_inline_styles/2, &ContentGeneration.escape_html/1)}
+      #{FormGeneration.generate_form_section(section, index, &build_css_classes/2, &build_inline_styles/2, &ContentGeneration.escape_html/1, true)}
     </div>
     """
   end

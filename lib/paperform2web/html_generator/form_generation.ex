@@ -4,10 +4,12 @@ defmodule Paperform2web.HtmlGenerator.FormGeneration do
   Handles form sections, inputs, radio button grouping, and various field types.
   """
 
+  # Alias Jason for JSON encoding
+
   @doc """
   Generates a form section based on the section type and metadata.
   """
-  def generate_form_section(section, index, css_builder, style_builder, html_escaper) do
+  def generate_form_section(section, index, css_builder, style_builder, html_escaper, editing_mode \\ false) do
     type = section["type"] || "text"
     content = section["content"] || ""
     formatting = section["formatting"] || %{}
@@ -34,7 +36,7 @@ defmodule Paperform2web.HtmlGenerator.FormGeneration do
     case type do
       "form_input" ->
         if get_in(section, ["metadata", "input_type"]) do
-          generate_form_input(content, "#{css_classes}#{width_class}", inline_styles, section, html_escaper)
+          generate_form_input(content, "#{css_classes}#{width_class}", inline_styles, section, html_escaper, editing_mode)
         else
           # Fallback to legacy type-based generation
           generate_legacy_form_section(type, content, css_classes, inline_styles, width_class, field_name, section, index, html_escaper)
@@ -91,15 +93,15 @@ defmodule Paperform2web.HtmlGenerator.FormGeneration do
         cond do
           # Check for form_field_id (indicates user-added field)
           Map.has_key?(section, "form_field_id") ->
-            generate_form_input(content, "#{css_classes}#{width_class}", inline_styles, section, html_escaper)
+            generate_form_input(content, "#{css_classes}#{width_class}", inline_styles, section, html_escaper, editing_mode)
 
           # Check if field_name starts with user_field_ (restored user field)
           String.starts_with?(field_name, "user_field_") ->
-            generate_form_input(content, "#{css_classes}#{width_class}", inline_styles, section, html_escaper)
+            generate_form_input(content, "#{css_classes}#{width_class}", inline_styles, section, html_escaper, editing_mode)
 
           # Check if it's a form_input type (AI-detected form field)
           type == "form_input" ->
-            generate_form_input(content, "#{css_classes}#{width_class}", inline_styles, section, html_escaper)
+            generate_form_input(content, "#{css_classes}#{width_class}", inline_styles, section, html_escaper, editing_mode)
 
           # Fallback to legacy type-based generation
           true ->
@@ -111,7 +113,7 @@ defmodule Paperform2web.HtmlGenerator.FormGeneration do
   @doc """
   Generates form inputs based on input type and metadata.
   """
-  def generate_form_input(content, css_classes, inline_styles, section, html_escaper) do
+  def generate_form_input(content, css_classes, inline_styles, section, html_escaper, editing_mode \\ false) do
     input_type =
       get_in(section, ["metadata", "input_type"]) ||
       get_in(section, ["metadata", "field_type"]) ||
@@ -134,18 +136,34 @@ defmodule Paperform2web.HtmlGenerator.FormGeneration do
       IO.puts("  - section metadata: #{inspect(section["metadata"])}")
     end
 
+    # Determine if we need to add editable-field class for editing mode
+    form_field_id = get_in(section, ["form_field_id"]) || get_in(section, ["metadata", "field_name"])
+
     case input_type do
       "checkbox" ->
         # Create unique checkbox ID
         checkbox_id = "#{field_name}_#{:erlang.phash2(content)}"
         checked = if String.contains?(String.downcase(content), "checked") or field_value == "true", do: " checked", else: ""
         value = if field_value != "", do: field_value, else: "on"
-        """
-        <div class="form-field checkbox-field #{css_classes}" style="#{inline_styles}">
-            <input type="checkbox" id="#{checkbox_id}" name="#{field_name}" value="#{html_escaper.(value)}"#{checked}#{required_attr}>
-            <label for="#{checkbox_id}">#{html_escaper.(content)}</label>
-        </div>
-        """
+
+        if editing_mode and form_field_id do
+          """
+          <div class="editable-field" data-field-type="#{input_type}" draggable="true" id="editable_#{form_field_id}">
+              <div class="form-field checkbox-field #{css_classes}" style="#{inline_styles}">
+                  <input type="checkbox" id="#{checkbox_id}" name="#{field_name}" value="#{html_escaper.(value)}"#{checked}#{required_attr}>
+                  <label for="#{checkbox_id}" class="editable-label" contenteditable="true">#{html_escaper.(content)}</label>
+                  <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
+              </div>
+          </div>
+          """
+        else
+          """
+          <div class="form-field checkbox-field #{css_classes}" style="#{inline_styles}">
+              <input type="checkbox" id="#{checkbox_id}" name="#{field_name}" value="#{html_escaper.(value)}"#{checked}#{required_attr}>
+              <label for="#{checkbox_id}">#{html_escaper.(content)}</label>
+          </div>
+          """
+        end
 
       "radio" ->
         # Handle radio buttons - check if we have multiple options
@@ -173,14 +191,29 @@ defmodule Paperform2web.HtmlGenerator.FormGeneration do
             radio_html
           end) |> Enum.join("")
 
-          final_html = """
-          <div class="form-field radio-field #{css_classes}" style="#{inline_styles}">
-            <span class="radio-group-label">#{html_escaper.(content)}</span>
-            <div class="radio-options">
-              #{radio_buttons}
+          final_html = if editing_mode and form_field_id do
+            """
+            <div class="editable-field" data-field-type="radio" draggable="true" id="editable_#{form_field_id}" data-options='#{Jason.encode!(options)}'>
+              <div class="form-field">
+                <div class="form-question editable-label" contenteditable="true">#{html_escaper.(content)}</div>
+                <div class="radio-options">
+                  #{radio_buttons}
+                </div>
+                <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⚙️</button>
+                <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
+              </div>
             </div>
-          </div>
-          """
+            """
+          else
+            """
+            <div class="form-field radio-field #{css_classes}" style="#{inline_styles}">
+              <span class="radio-group-label">#{html_escaper.(content)}</span>
+              <div class="radio-options">
+                #{radio_buttons}
+              </div>
+            </div>
+            """
+          end
 
           if Application.get_env(:paperform2web, :debug_radio_buttons, false) do
             IO.puts("[Radio Input] Final radio group HTML: #{final_html}")
@@ -216,12 +249,29 @@ defmodule Paperform2web.HtmlGenerator.FormGeneration do
             "<option value=\"#{html_escaper.(option)}\"#{selected}>#{html_escaper.(option)}</option>"
           end)
         end
-        """
-        <div class="form-field #{css_classes}" style="#{inline_styles}">
-            <label for="#{field_name}">#{html_escaper.(content)}</label>
-            <select id="#{field_name}" name="#{field_name}"#{required_attr}>#{options_html}</select>
-        </div>
-        """
+
+        if editing_mode and form_field_id do
+          """
+          <div class="editable-field" data-field-type="select" draggable="true" id="editable_#{form_field_id}" data-options='#{Jason.encode!(options)}'>
+              <div class="form-field">
+                  <label for="#{field_name}" class="form-label editable-label" contenteditable="true">#{html_escaper.(content)}</label>
+                  <select id="#{field_name}" name="#{field_name}" class="editable-select">
+                      <option value="">Choose an option</option>
+                      #{options_html}
+                  </select>
+                  <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⚙️</button>
+                  <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
+              </div>
+          </div>
+          """
+        else
+          """
+          <div class="form-field #{css_classes}" style="#{inline_styles}">
+              <label for="#{field_name}">#{html_escaper.(content)}</label>
+              <select id="#{field_name}" name="#{field_name}"#{required_attr}>#{options_html}</select>
+          </div>
+          """
+        end
 
       input_type when input_type in ["date", "time", "datetime-local", "email", "tel", "url", "number", "password"] ->
         """
@@ -232,12 +282,24 @@ defmodule Paperform2web.HtmlGenerator.FormGeneration do
         """
 
       "text" ->
-        """
-        <div class="form-field #{css_classes}" style="#{inline_styles}">
-            <label for="#{field_name}">#{html_escaper.(content)}</label>
-            <input type="text" id="#{field_name}" name="#{field_name}" value="#{html_escaper.(field_value)}" placeholder="#{html_escaper.(placeholder)}"#{required_attr}>
-        </div>
-        """
+        if editing_mode and form_field_id do
+          """
+          <div class="editable-field" data-field-type="text" draggable="true" id="editable_#{form_field_id}">
+              <div class="form-field">
+                  <label for="#{field_name}" class="form-label editable-label" contenteditable="true">#{html_escaper.(content)}</label>
+                  <input type="text" id="#{field_name}" name="#{field_name}" class="editable-input" placeholder="Enter text..." value="#{html_escaper.(field_value)}">
+                  <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
+              </div>
+          </div>
+          """
+        else
+          """
+          <div class="form-field #{css_classes}" style="#{inline_styles}">
+              <label for="#{field_name}">#{html_escaper.(content)}</label>
+              <input type="text" id="#{field_name}" name="#{field_name}" value="#{html_escaper.(field_value)}" placeholder="#{html_escaper.(placeholder)}"#{required_attr}>
+          </div>
+          """
+        end
 
       _ ->
         # Force create a text input even for unknown types - NO STATIC CONTENT
