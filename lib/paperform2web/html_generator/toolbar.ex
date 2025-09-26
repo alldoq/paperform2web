@@ -229,44 +229,19 @@ defmodule Paperform2web.HtmlGenerator.Toolbar do
             background: rgba(52, 152, 219, 0.05);
         }
 
+        /* Disable hover effects during drag operations to prevent double borders */
+        .dragging-active .editable-field-wrapper:hover {
+            border-color: transparent !important;
+            background: transparent !important;
+        }
+
         .editable-field-wrapper.dragging {
             transform: rotate(2deg);
             box-shadow: 0 8px 25px rgba(0,0,0,0.15);
             z-index: 100;
         }
 
-        .drag-handle {
-            position: absolute;
-            left: -10px;
-            top: 50%;
-            transform: translateY(-50%);
-            width: 20px;
-            height: 40px;
-            background: #3498db;
-            border-radius: 4px;
-            cursor: grab;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            opacity: 0;
-            transition: opacity 0.2s ease;
-        }
-
-        .editable-field-wrapper:hover .drag-handle {
-            opacity: 1;
-        }
-
-        .drag-handle:active {
-            cursor: grabbing;
-        }
-
-        .drag-handle::before {
-            content: "⋮⋮";
-            font-size: 12px;
-            line-height: 1;
-            letter-spacing: -2px;
-        }
+        /* CSS drag handle removed - using JavaScript-created handle instead */
 
         .field-controls {
             position: absolute;

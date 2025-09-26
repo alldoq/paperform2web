@@ -104,7 +104,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             }
 
             // Create share modal HTML
-            const modalHtml = `
+            const modalHtml = \`
                 <div id="share-modal" class="share-modal-overlay">
                     <div class="share-modal">
                         <div class="share-modal-header">
@@ -146,7 +146,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                         </div>
                     </div>
                 </div>
-            `;
+            \`;
 
             // Add modal to page
             document.body.insertAdjacentHTML('beforeend', modalHtml);
@@ -195,7 +195,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             };
 
             // Send request
-            fetch(`/api/documents/${window.documentId}/share`, {
+            fetch(\`/api/documents/\${window.documentId}/share\`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -236,7 +236,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
         function addShareModalStyles() {
             if (document.getElementById('share-modal-styles')) return;
 
-            const styles = `
+            const styles = \`
                 <style id="share-modal-styles">
                     .share-modal-overlay {
                         position: fixed;
@@ -739,7 +739,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1) !important;
                     }
                 </style>
-            `;
+            \`;
             document.head.insertAdjacentHTML('beforeend', styles);
             console.log('Modal styles added successfully!');
             console.log('Styles element:', document.getElementById('modal-styles'));
@@ -1127,7 +1127,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             let endpoint, payload;
             if (shareToken) {
                 // Shared form submission
-                endpoint = `/api/share/${shareToken}/response`;
+                endpoint = \`/api/share/\${shareToken}/response\`;
                 payload = {
                     response_data: {
                         form_data: formData,
@@ -1137,7 +1137,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                 };
             } else {
                 // Test submission for preview mode
-                endpoint = `/api/documents/${documentId}/test-submission`;
+                endpoint = \`/api/documents/\${documentId}/test-submission\`;
                 payload = {
                     form_data: formData,
                     is_completed: true
@@ -1217,7 +1217,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
 
         function getFieldLabel(field) {
             // Try to find associated label
-            const label = document.querySelector(`label[for="${field.id}"]`);
+            const label = document.querySelector(\`label[for="\${field.id}"]\`);
             if (label) {
                 return label.textContent.trim();
             }
@@ -1236,7 +1236,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             const statusDiv = document.getElementById('form-status');
             if (!statusDiv) return;
 
-            statusDiv.className = `form-status ${type}`;
+            statusDiv.className = \`form-status \${type}\`;
             statusDiv.textContent = message;
             statusDiv.style.display = 'block';
         }
@@ -1296,42 +1296,596 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
         function initializeDragAndDrop() {
             // Make all form fields draggable
             const formFields = document.querySelectorAll('.editable-field');
-            formFields.forEach(field => {
-                field.draggable = true;
-                field.addEventListener('dragstart', handleDragStart);
-                field.addEventListener('dragover', handleDragOver);
-                field.addEventListener('drop', handleDrop);
-                field.addEventListener('dragend', handleDragEnd);
+            console.log('🎯 Initializing drag and drop for', formFields.length, 'fields');
+
+            formFields.forEach((field, index) => {
+                console.log(\`🔧 Setting up mouse-based drag for field \${index + 1}:\`, field.id);
+
+                // Disable draggable on contenteditable elements to prevent conflicts
+                const editableElements = field.querySelectorAll('[contenteditable]');
+                editableElements.forEach(el => {
+                    el.draggable = false;
+                    el.addEventListener('dragstart', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    });
+                });
+
+                // Remove any existing drag handles first, then add our JavaScript one
+                const existingHandles = field.querySelectorAll('.drag-handle');
+                existingHandles.forEach(handle => handle.remove());
+
+                // Add our JavaScript drag handle
+                const dragHandle = document.createElement('div');
+                dragHandle.className = 'drag-handle';
+                dragHandle.innerHTML = \`
+                    <svg width="12" height="20" viewBox="0 0 12 20" fill="none">
+                        <circle cx="3" cy="4" r="1.5" fill="currentColor"/>
+                        <circle cx="9" cy="4" r="1.5" fill="currentColor"/>
+                        <circle cx="3" cy="10" r="1.5" fill="currentColor"/>
+                        <circle cx="9" cy="10" r="1.5" fill="currentColor"/>
+                        <circle cx="3" cy="16" r="1.5" fill="currentColor"/>
+                        <circle cx="9" cy="16" r="1.5" fill="currentColor"/>
+                    </svg>
+                \`;
+                dragHandle.title = 'Drag to reorder fields';
+                dragHandle.draggable = false; // Handle itself not draggable
+                dragHandle.style.cssText = \`
+                    position: absolute;
+                    top: 50%;
+                    left: -25px;
+                    transform: translateY(-50%);
+                    cursor: grab;
+                    background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+                    color: white;
+                    padding: 10px 8px;
+                    border-radius: 6px;
+                    font-size: 12px;
+                    z-index: 10;
+                    user-select: none;
+                    box-shadow: 0 3px 12px rgba(52, 152, 219, 0.4);
+                    border: 2px solid rgba(255,255,255,0.3);
+                    transition: all 0.2s ease;
+                    opacity: 0.7;
+                \`;
+
+                // Add hover effects
+                dragHandle.addEventListener('mouseenter', function() {
+                    this.style.opacity = '1';
+                    this.style.transform = 'translateY(-50%) scale(1.1)';
+                    this.style.boxShadow = '0 5px 20px rgba(52, 152, 219, 0.6)';
+                });
+
+                dragHandle.addEventListener('mouseleave', function() {
+                    if (!isDragging) {
+                        this.style.opacity = '0.7';
+                        this.style.transform = 'translateY(-50%) scale(1)';
+                        this.style.boxShadow = '0 3px 12px rgba(52, 152, 219, 0.4)';
+                    }
+                });
+                field.style.position = 'relative';
+                field.appendChild(dragHandle);
+
+                    // Make the drag handle trigger mouse-based drag
+                    let isDragging = false;
+                    let dragStartY = 0;
+                    let dragPreview = null;
+                    let currentHandleMouseMove = null;
+                    let currentHandleMouseUp = null;
+
+                    dragHandle.addEventListener('mousedown', function(e) {
+                        console.log('🖱️ Drag handle mousedown for field:', field.id);
+                        e.preventDefault();
+                        e.stopPropagation();
+
+                        isDragging = true;
+                        dragStartY = e.clientY;
+                        draggedElement = field; // Set the global dragged element
+                        console.log('🚀 Mouse drag started for:', field.id);
+
+                        // Visual feedback
+                        field.style.opacity = '0.5';
+                        dragHandle.style.cursor = 'grabbing';
+
+                        // Create drag preview
+                        dragPreview = field.cloneNode(true);
+                        dragPreview.style.cssText = \`
+                            position: fixed;
+                            pointer-events: none;
+                            z-index: 1000;
+                            opacity: 0.8;
+                            transform: rotate(2deg) scale(0.9);
+                            background: white;
+                            border: 2px solid #3498db;
+                            border-radius: 8px;
+                            box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+                            width: \${field.offsetWidth}px;
+                            max-width: 400px;
+                        \`;
+                        dragPreview.style.left = e.clientX + 10 + 'px';
+                        dragPreview.style.top = e.clientY + 10 + 'px';
+                        document.body.appendChild(dragPreview);
+
+                        // Disable hover effects during drag to prevent double borders
+                        document.body.classList.add('dragging-active');
+
+                        // Add visual indicators to all fields (use existing wrapper borders)
+                        document.querySelectorAll('.editable-field').forEach(f => {
+                            if (f !== field) {
+                                // Find the wrapper and activate its border
+                                const wrapper = f.closest('.editable-field-wrapper');
+                                if (wrapper) {
+                                    wrapper.style.borderStyle = 'dashed';
+                                    wrapper.style.borderColor = '#3498db';
+                                    wrapper.style.borderWidth = '2px';
+                                    wrapper.style.background = 'rgba(52, 152, 219, 0.08)';
+                                    wrapper.style.borderRadius = '8px';
+                                    wrapper.style.transition = 'all 0.2s ease';
+                                }
+
+                                const dropZone = document.createElement('div');
+                                dropZone.className = 'drop-zone-indicator';
+                                dropZone.innerHTML = \`
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style="color: white;">
+                                            <path d="M7 13l3 3 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                        <span>Drop to reorder</span>
+                                    </div>
+                                \`;
+                                dropZone.style.cssText = \`
+                                    position: absolute;
+                                    top: 50%;
+                                    left: 50%;
+                                    transform: translate(-50%, -50%);
+                                    background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+                                    color: white;
+                                    padding: 12px 16px;
+                                    border-radius: 8px;
+                                    font-size: 13px;
+                                    font-weight: 600;
+                                    z-index: 200;
+                                    opacity: 0.95;
+                                    pointer-events: none;
+                                    box-shadow: 0 4px 12px rgba(52, 152, 219, 0.4);
+                                    border: 2px solid rgba(255, 255, 255, 0.3);
+                                    animation: dropZonePulse 2s infinite;
+                                \`;
+                                f.appendChild(dropZone);
+                            }
+                        });
+
+                        // Add CSS animation for drop zone pulsing
+                        if (!document.getElementById('drop-zone-animation')) {
+                            const style = document.createElement('style');
+                            style.id = 'drop-zone-animation';
+                            style.textContent = \`
+                                @keyframes dropZonePulse {
+                                    0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.95; }
+                                    50% { transform: translate(-50%, -50%) scale(1.05); opacity: 1; }
+                                }
+                            \`;
+                            document.head.appendChild(style);
+                        }
+
+                        currentHandleMouseMove = function(e) {
+                            if (!isDragging) return;
+
+                            // Update preview position
+                            if (dragPreview) {
+                                dragPreview.style.left = e.clientX + 10 + 'px';
+                                dragPreview.style.top = e.clientY + 10 + 'px';
+                            }
+
+                            // Check if we're over a drop target
+                            const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
+                            const targetField = elementBelow?.closest('.editable-field');
+
+                            // Update drop target highlighting
+                            document.querySelectorAll('.editable-field').forEach(f => {
+                                const wrapper = f.closest('.editable-field-wrapper');
+                                const dropZone = f.querySelector('.drop-zone-indicator');
+
+                                if (f === targetField && f !== field && wrapper) {
+                                    // Highlight the active drop target
+                                    wrapper.style.borderStyle = 'solid';
+                                    wrapper.style.borderColor = '#2980b9';
+                                    wrapper.style.borderWidth = '3px';
+                                    wrapper.style.background = 'rgba(52, 152, 219, 0.2)';
+                                    wrapper.style.boxShadow = '0 0 20px rgba(52, 152, 219, 0.5)';
+
+                                    // Make drop zone more prominent
+                                    if (dropZone) {
+                                        dropZone.style.opacity = '1';
+                                        dropZone.style.transform = 'translate(-50%, -50%) scale(1.1)';
+                                        dropZone.style.boxShadow = '0 6px 20px rgba(52, 152, 219, 0.6)';
+                                    }
+                                } else if (f !== field && wrapper) {
+                                    // Regular drop zone appearance
+                                    wrapper.style.borderStyle = 'dashed';
+                                    wrapper.style.borderColor = '#3498db';
+                                    wrapper.style.borderWidth = '2px';
+                                    wrapper.style.background = 'rgba(52, 152, 219, 0.08)';
+                                    wrapper.style.boxShadow = '';
+
+                                    // Regular drop zone appearance
+                                    if (dropZone) {
+                                        dropZone.style.opacity = '0.95';
+                                        dropZone.style.transform = 'translate(-50%, -50%) scale(1)';
+                                        dropZone.style.boxShadow = '0 4px 12px rgba(52, 152, 219, 0.4)';
+                                    }
+                                }
+                            });
+                        };
+
+                        currentHandleMouseUp = function(e) {
+                            console.log('🎯 Mouse drag ended for:', field.id);
+                            if (!isDragging) return;
+
+                            // Clean up event listeners immediately
+                            if (currentHandleMouseMove) {
+                                document.removeEventListener('mousemove', currentHandleMouseMove);
+                                currentHandleMouseMove = null;
+                            }
+                            if (currentHandleMouseUp) {
+                                document.removeEventListener('mouseup', currentHandleMouseUp);
+                                currentHandleMouseUp = null;
+                            }
+
+                            isDragging = false;
+                            field.style.opacity = '';
+                            dragHandle.style.cursor = 'grab';
+
+                            // Re-enable hover effects
+                            document.body.classList.remove('dragging-active');
+
+                            // Remove drag preview
+                            if (dragPreview) {
+                                document.body.removeChild(dragPreview);
+                                dragPreview = null;
+                            }
+
+                            // Remove all visual indicators
+                            document.querySelectorAll('.editable-field').forEach(f => {
+                                f.style.borderTop = '';
+                                f.style.backgroundColor = '';
+
+                                // Reset wrapper borders to transparent and clear all drag styles
+                                const wrapper = f.closest('.editable-field-wrapper');
+                                if (wrapper) {
+                                    wrapper.style.borderStyle = '';
+                                    wrapper.style.borderColor = 'transparent';
+                                    wrapper.style.borderWidth = '';
+                                    wrapper.style.background = '';
+                                    wrapper.style.borderRadius = '';
+                                    wrapper.style.transition = '';
+                                    wrapper.style.boxShadow = '';
+                                }
+
+                                const dropZone = f.querySelector('.drop-zone-indicator');
+                                if (dropZone) {
+                                    f.removeChild(dropZone);
+                                }
+                            });
+
+                            // Check drop target - exclude the dragged element from hit testing
+                            field.style.pointerEvents = 'none';
+                            if (dragPreview) {
+                                dragPreview.style.pointerEvents = 'none';
+                            }
+
+                            const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
+                            field.style.pointerEvents = '';
+
+                            let targetField = elementBelow?.closest('.editable-field');
+
+                            // More detailed debugging
+                            console.log('🎯 Drop detection debug:', {
+                                mouseX: e.clientX,
+                                mouseY: e.clientY,
+                                elementBelow: elementBelow?.tagName + (elementBelow?.className ? '.' + elementBelow.className : ''),
+                                elementBelowId: elementBelow?.id,
+                                targetField: targetField?.id || 'NONE',
+                                allEditableFields: Array.from(document.querySelectorAll('.editable-field')).map(f => f.id).slice(0, 5)
+                            });
+
+                            // If no target found, try alternative detection
+                            if (!targetField) {
+                                console.log('🔍 Alternative detection - checking all fields at mouse position');
+                                const allFields = document.querySelectorAll('.editable-field');
+                                let closestField = null;
+                                let minDistance = Infinity;
+                                const distances = [];
+
+                                allFields.forEach(f => {
+                                    if (f === field) return; // Skip the dragged field
+
+                                    const rect = f.getBoundingClientRect();
+                                    const centerX = rect.left + rect.width / 2;
+                                    const centerY = rect.top + rect.height / 2;
+                                    const distance = Math.sqrt(
+                                        Math.pow(e.clientX - centerX, 2) +
+                                        Math.pow(e.clientY - centerY, 2)
+                                    );
+
+                                    distances.push({
+                                        id: f.id,
+                                        distance: Math.round(distance)
+                                    });
+
+                                    if (distance < minDistance && distance < 500) { // Increased to 500px
+                                        minDistance = distance;
+                                        closestField = f;
+                                    }
+                                });
+
+                                console.log('🔍 Distance check:', {
+                                    mousePos: \`\${e.clientX}, \${e.clientY}\`,
+                                    closestDistances: distances.sort((a, b) => a.distance - b.distance).slice(0, 5),
+                                    foundWithin500px: !!closestField
+                                });
+
+                                if (closestField) {
+                                    console.log('🎯 Found closest field:', closestField.id, 'distance:', Math.round(minDistance));
+                                    targetField = closestField; // Use the closest field as target
+                                } else {
+                                    console.log('🔍 No nearby fields found within 500px');
+                                }
+                            }
+
+                            if (targetField && targetField !== field) {
+                                console.log('🔄 Dropping on target field:', targetField.id);
+
+                                // Find the actual wrapper elements to move (since fields are wrapped)
+                                const fieldWrapper = field.closest('.editable-field-wrapper') || field.parentNode;
+                                const targetWrapper = targetField.closest('.editable-field-wrapper') || targetField.parentNode;
+
+                                console.log('🔍 Wrapper detection:', {
+                                    fieldId: field.id,
+                                    targetId: targetField.id,
+                                    fieldWrapper: fieldWrapper?.tagName + '.' + (fieldWrapper?.className || ''),
+                                    targetWrapper: targetWrapper?.tagName + '.' + (targetWrapper?.className || ''),
+                                    fieldWrapperFound: !!field.closest('.editable-field-wrapper'),
+                                    targetWrapperFound: !!targetField.closest('.editable-field-wrapper')
+                                });
+
+                                // Find their common parent container
+                                const fieldParent = fieldWrapper.parentNode;
+                                const targetParent = targetWrapper.parentNode;
+
+                                console.log('🔍 Parent check:', {
+                                    fieldWrapper: fieldWrapper?.tagName + '.' + (fieldWrapper?.className || ''),
+                                    targetWrapper: targetWrapper?.tagName + '.' + (targetWrapper?.className || ''),
+                                    fieldParent: fieldParent?.tagName + '.' + (fieldParent?.className || ''),
+                                    targetParent: targetParent?.tagName + '.' + (targetParent?.className || ''),
+                                    sameParent: fieldParent === targetParent,
+                                    fieldWrapperInParent: fieldParent?.contains(fieldWrapper),
+                                    targetWrapperInParent: targetParent?.contains(targetWrapper)
+                                });
+
+                                // Additional validation for wrappers
+                                const fieldWrapperInDOM = document.body.contains(fieldWrapper);
+                                const targetWrapperInDOM = document.body.contains(targetWrapper);
+                                const fieldParentValid = fieldParent && document.body.contains(fieldParent);
+                                const targetParentValid = targetParent && document.body.contains(targetParent);
+
+                                console.log('🔍 Extended validation:', {
+                                    fieldWrapperInDOM,
+                                    targetWrapperInDOM,
+                                    fieldParentValid,
+                                    targetParentValid,
+                                    sameParent: fieldParent === targetParent
+                                });
+
+                                if (fieldWrapperInDOM && targetWrapperInDOM && fieldParentValid && targetParentValid && fieldParent === targetParent) {
+                                    const allChildren = Array.from(fieldParent.children);
+                                    const draggedIndex = allChildren.indexOf(fieldWrapper);
+                                    const targetIndex = allChildren.indexOf(targetWrapper);
+
+                                    console.log('🔄 Moving element', {
+                                        draggedIndex,
+                                        targetIndex,
+                                        direction: draggedIndex < targetIndex ? 'down' : 'up',
+                                        totalChildren: allChildren.length,
+                                        draggedInDOM: draggedIndex !== -1,
+                                        targetInDOM: targetIndex !== -1
+                                    });
+
+                                    if (draggedIndex !== -1 && targetIndex !== -1 && draggedIndex !== targetIndex) {
+                                        try {
+                                            // Double-check before manipulation - move wrappers instead of fields
+                                            if (fieldParent.contains(fieldWrapper) && fieldParent.contains(targetWrapper)) {
+                                                if (draggedIndex < targetIndex) {
+                                                    const nextSibling = targetWrapper.nextSibling;
+                                                    if (nextSibling && fieldParent.contains(nextSibling)) {
+                                                        fieldParent.insertBefore(fieldWrapper, nextSibling);
+                                                    } else {
+                                                        fieldParent.appendChild(fieldWrapper);
+                                                    }
+                                                } else {
+                                                    fieldParent.insertBefore(fieldWrapper, targetWrapper);
+                                                }
+                                                console.log('✅ Wrapper moved successfully, saving form structure');
+                                                saveFormStructure();
+                                            } else {
+                                                console.log('❌ Final validation failed - wrappers not in parent');
+                                            }
+                                        } catch (error) {
+                                            console.error('❌ DOM manipulation error:', error.message);
+                                            console.log('Error details:', {
+                                                fieldId: field.id,
+                                                targetId: targetField.id,
+                                                fieldWrapperTag: fieldWrapper?.tagName,
+                                                targetWrapperTag: targetWrapper?.tagName,
+                                                fieldParentTag: fieldParent?.tagName,
+                                                targetParentTag: targetParent?.tagName,
+                                                fieldWrapperInParent: fieldParent?.contains(fieldWrapper),
+                                                targetWrapperInParent: fieldParent?.contains(targetWrapper)
+                                            });
+                                        }
+                                    } else {
+                                        console.log('❌ Cannot move - invalid indices or same element');
+                                    }
+                                } else {
+                                    console.log('❌ Cannot move - validation failed');
+                                }
+                            } else {
+                                console.log('⚠️ No valid drop target found');
+                            }
+
+                            draggedElement = null;
+                        };
+
+                        // Clean up any existing listeners first
+                        if (currentHandleMouseMove) {
+                            document.removeEventListener('mousemove', currentHandleMouseMove);
+                        }
+                        if (currentHandleMouseUp) {
+                            document.removeEventListener('mouseup', currentHandleMouseUp);
+                        }
+
+                        document.addEventListener('mousemove', currentHandleMouseMove);
+                        document.addEventListener('mouseup', currentHandleMouseUp);
+                    });
+
+                // Disable HTML5 drag events since we're using mouse-based dragging
+                field.draggable = false; // Disable native dragging
+                // field.addEventListener('dragstart', handleDragStart);
+                // field.addEventListener('dragover', handleDragOver);
+                // field.addEventListener('drop', handleDrop);
+                // field.addEventListener('dragend', handleDragEnd);
+
+                // Test if events are properly attached
+                field.addEventListener('mousedown', function() {
+                    console.log('🖱️ Mouse down on field:', this.id);
+                });
             });
+
+            // Container drop zone not needed for mouse-based drag and drop
+            // const formContainer = document.querySelector('.container, .form-content, .form-fields');
+            // if (formContainer) {
+            //     console.log('📦 Setting up form container as drop zone:', formContainer.className);
+            //     formContainer.addEventListener('dragover', handleContainerDragOver);
+            //     formContainer.addEventListener('drop', handleContainerDrop);
+            // }
         }
 
         function handleDragStart(e) {
             draggedElement = this;
             this.style.opacity = '0.5';
+            // Store the element ID in dataTransfer as backup
+            e.dataTransfer.setData('text/plain', this.id);
+            e.dataTransfer.effectAllowed = 'move';
+            console.log('🚀 Drag started:', this.id);
         }
 
         function handleDragOver(e) {
             e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
         }
 
         function handleDrop(e) {
             e.preventDefault();
-            if (draggedElement !== this) {
-                const draggedIndex = Array.from(this.parentNode.children).indexOf(draggedElement);
-                const targetIndex = Array.from(this.parentNode.children).indexOf(this);
+            e.stopPropagation(); // Prevent container drop handler from firing
+
+            // Get dragged element - use backup from dataTransfer if needed
+            let actualDraggedElement = draggedElement;
+            if (!actualDraggedElement) {
+                const draggedId = e.dataTransfer.getData('text/plain');
+                actualDraggedElement = document.getElementById(draggedId);
+                console.log('🔄 Retrieved dragged element from dataTransfer:', draggedId);
+            }
+
+            console.log('🎯 Field drop event triggered', {
+                draggedElement: actualDraggedElement?.id || 'UNDEFINED',
+                draggedElementExists: !!actualDraggedElement,
+                targetElement: this.id,
+                sameElement: actualDraggedElement === this,
+                bothExist: !!(actualDraggedElement && this)
+            });
+
+            if (actualDraggedElement && actualDraggedElement !== this) {
+                const parent = this.parentNode;
+                const draggedIndex = Array.from(parent.children).indexOf(actualDraggedElement);
+                const targetIndex = Array.from(parent.children).indexOf(this);
+
+                console.log('🔄 Moving element', {
+                    draggedIndex,
+                    targetIndex,
+                    direction: draggedIndex < targetIndex ? 'down' : 'up'
+                });
 
                 if (draggedIndex < targetIndex) {
-                    this.parentNode.insertBefore(draggedElement, this.nextSibling);
+                    // Moving down: insert after target
+                    parent.insertBefore(actualDraggedElement, this.nextSibling);
                 } else {
-                    this.parentNode.insertBefore(draggedElement, this);
+                    // Moving up: insert before target
+                    parent.insertBefore(actualDraggedElement, this);
                 }
+
+                console.log('✅ Element moved, saving form structure');
                 saveFormStructure();
+                draggedElement = null; // Clear after successful move
+            } else {
+                console.log('⚠️ No valid drag operation (same element or no dragged element)');
             }
         }
 
         function handleDragEnd(e) {
+            console.log('🏁 Drag ended for:', this.id);
             this.style.opacity = '';
-            draggedElement = null;
+            // Don't immediately clear draggedElement - let the drop handler clear it
+            setTimeout(() => {
+                if (draggedElement) {
+                    console.log('⚠️ Clearing draggedElement after timeout');
+                    draggedElement = null;
+                }
+            }, 100);
+        }
+
+        function handleContainerDragOver(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+        }
+
+        function handleContainerDrop(e) {
+            // Only handle container drops if we didn't drop on a field
+            if (e.target.closest('.editable-field')) {
+                return; // Let the field handler deal with it
+            }
+
+            e.preventDefault();
+
+            // Get dragged element - use backup from dataTransfer if needed
+            let actualDraggedElement = draggedElement;
+            if (!actualDraggedElement) {
+                const draggedId = e.dataTransfer.getData('text/plain');
+                actualDraggedElement = document.getElementById(draggedId);
+                console.log('🔄 Retrieved dragged element from dataTransfer for container:', draggedId);
+            }
+
+            console.log('📦 Container drop event triggered (empty area)', {
+                draggedElement: actualDraggedElement?.id || 'UNDEFINED',
+                targetElement: e.target.tagName + (e.target.className ? '.' + e.target.className : '')
+            });
+
+            // Dropping on empty container area - append to the end
+            if (actualDraggedElement) {
+                const addButton = document.getElementById('add-field-button');
+                console.log('📦 Add button found:', !!addButton, 'Parent found:', !!addButton?.parentNode);
+
+                if (addButton && addButton.parentNode) {
+                    console.log('📦 Moving element to end of form');
+                    addButton.parentNode.insertBefore(actualDraggedElement, addButton);
+                    console.log('📦 Element moved, saving form structure');
+                    saveFormStructure();
+                    draggedElement = null; // Clear after successful move
+                } else {
+                    console.log('❌ Could not find add button or its parent');
+                }
+            } else {
+                console.log('❌ No dragged element found in container drop');
+            }
         }
 
         function initializeFieldEditing() {
@@ -1425,9 +1979,31 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                 if (documentId) {
                     // Collect current form state
                     const formState = collectCurrentFormState();
+                    const title = document.querySelector('.editable-title')?.textContent || 'Untitled Form';
 
-                    // Save to server (simplified - you'd implement proper API calls)
-                    console.log('Auto-saving form data:', formState);
+                    // Save to server
+                    fetch(\`/api/documents/\${documentId}\`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            title: title,
+                            form_data: formState,
+                            last_modified: new Date().toISOString()
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            throw new Error(data.error);
+                        }
+                        console.log('✅ Form data saved successfully after drag/drop');
+                    })
+                    .catch(error => {
+                        console.error('❌ Failed to save form data:', error);
+                        showNotification(error.message || 'Failed to save form changes', 'error');
+                    });
                 }
             }, 100); // Small delay to ensure DOM is updated
         }
@@ -1468,7 +2044,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
 
             formFields.forEach((field, index) => {
                 const fieldType = field.dataset.fieldType || 'text';
-                const fieldName = field.querySelector('input, textarea, select')?.name || `field_${index}`;
+                const fieldName = field.querySelector('input, textarea, select')?.name || \`field_\${index}\`;
                 const fieldContent = field.querySelector('.editable-label')?.textContent ||
                                    field.querySelector('label')?.textContent ||
                                    'Untitled Field';
@@ -1540,7 +2116,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             const title = document.querySelector('.editable-title').textContent;
 
             // Save to server
-            fetch(`/api/documents/${documentId}`, {
+            fetch(\`/api/documents/\${documentId}\`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1588,7 +2164,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                 radioFields: formState.filter(field => field.metadata.input_type === 'radio')
             });
 
-            fetch(`/api/documents/${documentId}`, {
+            fetch(\`/api/documents/\${documentId}\`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1628,7 +2204,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             addModalStyles();
 
             // Create add field modal HTML
-            const modalHtml = `
+            const modalHtml = \`
                 <div id="add-field-modal" class="modal-overlay">
                     <div class="modal">
                         <div class="modal-header">
@@ -1666,7 +2242,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                         </div>
                     </div>
                 </div>
-            `;
+            \`;
 
             // Add modal to page
             document.body.insertAdjacentHTML('beforeend', modalHtml);
@@ -1897,16 +2473,16 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
 
         function addNewFieldWithOptions(fieldType, fieldLabel, options) {
             // Generate new field with custom options for radio and select
-            const fieldId = `user_field_${Date.now()}`;
-            const fieldName = `user_field_${Date.now()}`;
+            const fieldId = \`user_field_\${Date.now()}\`;
+            const fieldName = \`user_field_\${Date.now()}\`;
             let fieldHtml = '';
 
             if (fieldType === 'select') {
                 const optionsHtml = options.map(option =>
-                    `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`
+                    \`<option value="\${escapeHtml(option)}">\${escapeHtml(option)}</option>\`
                 ).join('');
 
-                fieldHtml = `
+                fieldHtml = \`
                     <div class="editable-field" data-field-type="select" draggable="true" id="editable_${fieldId}" data-options='${JSON.stringify(options)}'>
                         <div class="form-field">
                             <label for="${fieldId}" class="form-label editable-label" contenteditable="true">${escapeHtml(fieldLabel)}</label>
@@ -1918,13 +2494,13 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                             <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
                         </div>
                     </div>
-                `;
+                \`;
             } else if (fieldType === 'radio') {
                 const radioButtonsHtml = options.map((option, index) =>
-                    `<label><input type="radio" name="${fieldName}" value="${escapeHtml(option)}"> ${escapeHtml(option)}</label>`
+                    \`<label><input type="radio" name="\${fieldName}" value="\${escapeHtml(option)}"> \${escapeHtml(option)}</label>\`
                 ).join('');
 
-                fieldHtml = `
+                fieldHtml = \`
                     <div class="editable-field" data-field-type="radio" draggable="true" id="editable_${fieldId}" data-options='${JSON.stringify(options)}'>
                         <div class="form-field">
                             <div class="form-question editable-label" contenteditable="true">${escapeHtml(fieldLabel)}</div>
@@ -1935,7 +2511,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                             <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
                         </div>
                     </div>
-                `;
+                \`;
             }
 
             // Add the field to the form
@@ -1944,14 +2520,14 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
 
         function addNewField(fieldType) {
             // Generate new field HTML based on type
-            const fieldId = `user_field_${Date.now()}`;
-            const fieldName = `user_field_${Date.now()}`;
+            const fieldId = \`user_field_\${Date.now()}\`;
+            const fieldName = \`user_field_\${Date.now()}\`;
 
             let fieldHtml = '';
 
             switch (fieldType) {
                 case 'text':
-                    fieldHtml = `
+                    fieldHtml = \`
                         <div class="editable-field" data-field-type="text" draggable="true" id="editable_${fieldId}">
                             <div class="form-field">
                                 <label for="${fieldId}" class="form-label editable-label" contenteditable="true">New Text Field</label>
@@ -1959,10 +2535,10 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                                 <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
                             </div>
                         </div>
-                    `;
+                    \`;
                     break;
                 case 'textarea':
-                    fieldHtml = `
+                    fieldHtml = \`
                         <div class="editable-field" data-field-type="textarea" draggable="true" id="editable_${fieldId}">
                             <div class="form-field">
                                 <label for="${fieldId}" class="form-label editable-label" contenteditable="true">New Text Area</label>
@@ -1970,10 +2546,10 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                                 <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
                             </div>
                         </div>
-                    `;
+                    \`;
                     break;
                 case 'select':
-                    fieldHtml = `
+                    fieldHtml = \`
                         <div class="editable-field" data-field-type="select" draggable="true" id="editable_${fieldId}" data-options='["Option 1", "Option 2", "Option 3"]'>
                             <div class="form-field">
                                 <label for="${fieldId}" class="form-label editable-label" contenteditable="true">New Dropdown</label>
@@ -1987,10 +2563,10 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                                 <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
                             </div>
                         </div>
-                    `;
+                    \`;
                     break;
                 case 'radio':
-                    fieldHtml = `
+                    fieldHtml = \`
                         <div class="editable-field" data-field-type="radio" draggable="true" id="editable_${fieldId}" data-options='["Option 1", "Option 2", "Option 3"]'>
                             <div class="form-field">
                                 <div class="form-question editable-label" contenteditable="true">New Radio Group</div>
@@ -2003,10 +2579,10 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                                 <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
                             </div>
                         </div>
-                    `;
+                    \`;
                     break;
                 case 'checkbox':
-                    fieldHtml = `
+                    fieldHtml = \`
                         <div class="editable-field" data-field-type="checkbox" draggable="true" id="editable_${fieldId}">
                             <div class="form-field checkbox-field">
                                 <input type="checkbox" id="${fieldId}" name="${fieldName}" value="checked">
@@ -2014,10 +2590,10 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                                 <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
                             </div>
                         </div>
-                    `;
+                    \`;
                     break;
                 case 'email':
-                    fieldHtml = `
+                    fieldHtml = \`
                         <div class="editable-field" data-field-type="email" draggable="true" id="editable_${fieldId}">
                             <div class="form-field">
                                 <label for="${fieldId}" class="form-label editable-label" contenteditable="true">Email Address</label>
@@ -2025,10 +2601,10 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                                 <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
                             </div>
                         </div>
-                    `;
+                    \`;
                     break;
                 case 'tel':
-                    fieldHtml = `
+                    fieldHtml = \`
                         <div class="editable-field" data-field-type="tel" draggable="true" id="editable_${fieldId}">
                             <div class="form-field">
                                 <label for="${fieldId}" class="form-label editable-label" contenteditable="true">Phone Number</label>
@@ -2036,10 +2612,10 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                                 <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
                             </div>
                         </div>
-                    `;
+                    \`;
                     break;
                 case 'date':
-                    fieldHtml = `
+                    fieldHtml = \`
                         <div class="editable-field" data-field-type="date" draggable="true" id="editable_${fieldId}">
                             <div class="form-field">
                                 <label for="${fieldId}" class="form-label editable-label" contenteditable="true">Date</label>
@@ -2047,10 +2623,10 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                                 <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
                             </div>
                         </div>
-                    `;
+                    \`;
                     break;
                 case 'number':
-                    fieldHtml = `
+                    fieldHtml = \`
                         <div class="editable-field" data-field-type="number" draggable="true" id="editable_${fieldId}">
                             <div class="form-field">
                                 <label for="${fieldId}" class="form-label editable-label" contenteditable="true">Number</label>
@@ -2058,7 +2634,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                                 <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
                             </div>
                         </div>
-                    `;
+                    \`;
                     break;
             }
 
@@ -2132,7 +2708,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             const optionsText = currentOptions.join(String.fromCharCode(10));
 
             // Create options edit modal
-            const modalHtml = `
+            const modalHtml = \`
                 <div id="edit-options-modal" class="modal-overlay">
                     <div class="modal">
                         <div class="modal-header">
@@ -2155,7 +2731,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                         </div>
                     </div>
                 </div>
-            `;
+            \`;
 
             // Add modal to page
             document.body.insertAdjacentHTML('beforeend', modalHtml);
@@ -2195,7 +2771,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                 // Update radio buttons
                 const radioContainer = field.querySelector('.radio-options');
                 radioContainer.innerHTML = newOptions.map(option =>
-                    `<label><input type="radio" name="${fieldName}" value="${escapeHtml(option)}"> ${escapeHtml(option)}</label>`
+                    \`<label><input type="radio" name="\${fieldName}" value="\${escapeHtml(option)}"> \${escapeHtml(option)}</label>\`
                 ).join('');
             }
 
@@ -2275,7 +2851,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
         function showNotification(message, type = 'info') {
             // Create notification element
             const notification = document.createElement('div');
-            notification.className = `notification notification-${type}`;
+            notification.className = \`notification notification-\${type}\`;
             notification.textContent = message;
 
             // Add to page
@@ -2300,7 +2876,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             console.log('Adding fresh modal styles...');
             console.log('Current document head:', document.head);
             console.log('About to add styles to head...');
-            const styles = `
+            const styles = \`
                 <style id="modal-styles">
                     /* Editing mode specific styles - ensure left alignment */
                     body.editing-mode .form-field,
@@ -2457,7 +3033,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                         display: block;
                     }
                 </style>
-            `;
+            \`;
             document.head.insertAdjacentHTML('beforeend', styles);
         }
 

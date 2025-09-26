@@ -9,8 +9,7 @@ defmodule Paperform2webWeb.DocumentController do
 
   def upload(conn, %{"file" => %Plug.Upload{} = upload, "model" => model, "theme" => theme}) do
     file_params = %{
-      "path" => upload.path,
-      "filename" => upload.filename
+      "path" => upload.path, "filename" => upload.filename
     }
     with {:ok, %Document{} = document} <- Documents.create_document(file_params, model, theme) do
       conn
@@ -56,8 +55,7 @@ defmodule Paperform2webWeb.DocumentController do
     theme = Map.get(params, "theme", document.theme || "default")
 
     case document.status do
-      "completed" ->
-        html_content = Documents.generate_html_with_options(document, %{
+      "completed" -> html_content = Documents.generate_html_with_options(document, %{
           editing: editing_mode,
           document_id: id,
           theme: theme
@@ -75,7 +73,7 @@ defmodule Paperform2webWeb.DocumentController do
 
   def update_theme(conn, %{"document_id" => id, "theme" => theme}) do
     document = Documents.get_document!(id)
-    
+
     case Documents.update_document_theme(document, theme) do
       {:ok, updated_document} ->
         conn
@@ -95,7 +93,7 @@ defmodule Paperform2webWeb.DocumentController do
 
   def update_form_structure(conn, %{"document_id" => id, "form_fields" => form_fields}) do
     document = Documents.get_document!(id)
-    
+
     case Documents.update_form_structure(document, form_fields) do
       {:ok, updated_document} ->
         conn
@@ -374,7 +372,6 @@ defmodule Paperform2webWeb.DocumentController do
   defp parse_expires_at(_), do: nil
 
   def test_submission(conn, %{"document_id" => id} = params) do
-    document = Documents.get_document!(id)
     form_data = Map.get(params, "form_data", %{})
 
     # Log the test submission for development purposes
