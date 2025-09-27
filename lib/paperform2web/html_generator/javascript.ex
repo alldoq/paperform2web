@@ -3462,7 +3462,6 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                     fieldHtml = \`
                         <div class="editable-field-wrapper" data-field-type="select" draggable="true" id="editable_${fieldId}">
                             <div class="field-controls">
-                                <input type="number" class="field-order-input" value="1" min="1" onchange="reorderFieldByNumber(this)" title="Field order" />
                                 <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
                                 <button class="field-control-btn edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                                 <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
@@ -3485,7 +3484,6 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                     fieldHtml = \`
                         <div class="editable-field-wrapper" data-field-type="radio" draggable="true" id="editable_${fieldId}">
                             <div class="field-controls">
-                                <input type="number" class="field-order-input" value="1" min="1" onchange="reorderFieldByNumber(this)" title="Field order" />
                                 <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
                                 <button class="field-control-btn edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                                 <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
