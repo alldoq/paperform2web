@@ -298,6 +298,23 @@ defmodule Paperform2web.HtmlGenerator.FormGeneration do
           """
         end
 
+      "label" ->
+        if editing_mode and form_field_id do
+          """
+          <div class="editable-field" data-field-type="label" draggable="true" id="editable_#{form_field_id}">
+              <div class="form-field">
+                  <div class="form-label-only editable-label" contenteditable="true">#{html_escaper.(content)}</div>
+              </div>
+          </div>
+          """
+        else
+          """
+          <div class="form-field #{css_classes}" style="#{inline_styles}">
+              <div class="form-label-only">#{html_escaper.(content)}</div>
+          </div>
+          """
+        end
+
       "text" ->
         if editing_mode and form_field_id do
           """

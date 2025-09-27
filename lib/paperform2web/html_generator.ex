@@ -187,6 +187,7 @@ defmodule Paperform2web.HtmlGenerator do
       """
       <div class="editable-field-wrapper" data-field-type="#{type}" draggable="true" id="#{field_id}">
         <div class="field-controls">
+          <input type="number" class="field-order-input" value="#{index + 1}" min="1" onchange="reorderFieldByNumber(this)" title="Field order" />
           <button class="field-control-btn edit-btn" onclick="editField('#{field_id}')" title="Edit field">✏️</button>
           #{if has_options, do: "<button class=\"field-control-btn edit-options-btn\" onclick=\"editFieldOptions(this)\" title=\"Edit options\">⋯</button>", else: ""}
           <button class="field-control-btn delete-btn" onclick="deleteField('#{field_id}')" title="Delete field">🗑️</button>

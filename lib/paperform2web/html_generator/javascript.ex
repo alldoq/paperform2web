@@ -1321,6 +1321,83 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                     button.remove();
                 }
             });
+
+            // Initialize order numbers for existing fields
+            updateFieldOrderNumbers();
+        }
+
+        function reorderFieldByNumber(input) {
+            const newPosition = parseInt(input.value);
+            const fieldWrapper = input.closest('.editable-field-wrapper');
+
+            if (!fieldWrapper || isNaN(newPosition) || newPosition < 1) {
+                // Reset to current position if invalid
+                updateFieldOrderNumbers();
+                return;
+            }
+
+            console.log(`🔢 Reordering field to position ${newPosition}`);
+
+            // Get all field wrappers in the container
+            const container = document.querySelector('.document-content') || document.querySelector('main');
+            if (!container) return;
+
+            const allWrappers = Array.from(container.querySelectorAll('.editable-field-wrapper'));
+            const currentIndex = allWrappers.indexOf(fieldWrapper);
+
+            if (currentIndex === -1) return;
+
+            // Calculate target index (1-based to 0-based)
+            const targetIndex = Math.min(newPosition - 1, allWrappers.length - 1);
+
+            if (currentIndex === targetIndex) {
+                // No change needed
+                updateFieldOrderNumbers();
+                return;
+            }
+
+            // Remove the field from its current position
+            fieldWrapper.remove();
+
+            // Insert at new position
+            if (targetIndex >= allWrappers.length - 1) {
+                // Insert at the end
+                const addButton = container.querySelector('#add-field-button');
+                if (addButton) {
+                    addButton.parentNode.insertBefore(fieldWrapper, addButton);
+                } else {
+                    container.appendChild(fieldWrapper);
+                }
+            } else {
+                // Insert before the target position
+                const targetWrapper = allWrappers[targetIndex];
+                if (targetWrapper && targetWrapper.parentNode) {
+                    targetWrapper.parentNode.insertBefore(fieldWrapper, targetWrapper);
+                }
+            }
+
+            // Update all order numbers and recreate drop indicators
+            updateFieldOrderNumbers();
+            createDropIndicators();
+
+            // Auto-save the new order
+            saveFormData();
+        }
+
+        function updateFieldOrderNumbers() {
+            const container = document.querySelector('.document-content') || document.querySelector('main');
+            if (!container) return;
+
+            const wrappers = container.querySelectorAll('.editable-field-wrapper');
+            console.log(`🔢 Updating order numbers for ${wrappers.length} fields`);
+
+            wrappers.forEach((wrapper, index) => {
+                const orderInput = wrapper.querySelector('.field-order-input');
+                if (orderInput) {
+                    orderInput.value = index + 1;
+                    orderInput.max = wrappers.length;
+                }
+            });
         }
 
         // Drop indicator management
@@ -1349,6 +1426,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                         <span class="drop-zone-icon">⬇️</span>
                         <div class="drop-zone-text">DRAG YOUR ELEMENT HERE</div>
                         <div class="drop-zone-subtext">Field will be placed before this one</div>
+                        <button class="drop-zone-add-btn" onclick="showAddFieldAtPosition(${index}, 'before')" title="Add field here">➕ Add Field</button>
                     </div>
                 \`;
                 wrapper.parentNode.insertBefore(zoneBefore, wrapper);
@@ -1366,6 +1444,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                             <span class="drop-zone-icon">⬇️</span>
                             <div class="drop-zone-text">DRAG YOUR ELEMENT HERE</div>
                             <div class="drop-zone-subtext">Field will be placed at the end</div>
+                            <button class="drop-zone-add-btn" onclick="showAddFieldAtPosition(${index + 1}, 'after')" title="Add field here">➕ Add Field</button>
                         </div>
                     \`;
                     wrapper.parentNode.insertBefore(zoneAfter, wrapper.nextSibling);
@@ -1385,6 +1464,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                         <span class="drop-zone-icon">⬇️</span>
                         <div class="drop-zone-text">DRAG YOUR ELEMENT HERE</div>
                         <div class="drop-zone-subtext">Field will be placed at the beginning</div>
+                        <button class="drop-zone-add-btn" onclick="showAddFieldAtPosition(0, 'before')" title="Add field here">➕ Add Field</button>
                     </div>
                 \`;
                 container.insertBefore(zone, container.firstChild);
@@ -2313,6 +2393,10 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
 
             console.log('✅ Field moved successfully');
             console.log('🔄 Triggering save after field reorder...');
+
+            // Update order numbers after drag and drop
+            updateFieldOrderNumbers();
+
             window.isReorderOperation = true; // Mark as reorder operation
             saveFormData();
             window.isReorderOperation = false; // Reset flag
@@ -2969,6 +3053,16 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             });
         }
 
+        function showAddFieldAtPosition(index, position) {
+            console.log(`showAddFieldAtPosition called at index ${index}, position ${position}`);
+
+            // Store the position for later use when creating the field
+            window.insertPosition = { index, position };
+
+            // Show the regular add field dialog
+            showAddFieldDialog();
+        }
+
         function showAddFieldDialog() {
             console.log('showAddFieldDialog called');
 
@@ -2985,6 +3079,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                         </div>
                         <div class="modal-body">
                             <div class="field-types">
+                                <button class="field-type-btn" data-type="label">🏷️ Label Only</button>
                                 <button class="field-type-btn" data-type="text">📝 Text Input</button>
                                 <button class="field-type-btn" data-type="textarea">📄 Text Area</button>
                                 <button class="field-type-btn" data-type="select">📋 Dropdown</button>
@@ -3257,6 +3352,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                 fieldHtml = \`
                     <div class="editable-field-wrapper" data-field-type="select" draggable="true" id="editable_${fieldId}">
                         <div class="field-controls">
+                            <input type="number" class="field-order-input" value="1" min="1" onchange="reorderFieldByNumber(this)" title="Field order" />
                             <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
                             <button class="field-control-btn edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                             <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
@@ -3280,6 +3376,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                 fieldHtml = \`
                     <div class="editable-field-wrapper" data-field-type="radio" draggable="true" id="editable_${fieldId}">
                         <div class="field-controls">
+                            <input type="number" class="field-order-input" value="1" min="1" onchange="reorderFieldByNumber(this)" title="Field order" />
                             <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
                             <button class="field-control-btn edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                             <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
@@ -3308,10 +3405,29 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             let fieldHtml = '';
 
             switch (fieldType) {
+                case 'label':
+                    fieldHtml = \`
+                        <div class="editable-field-wrapper" data-field-type="label" draggable="true" id="editable_${fieldId}">
+                            <div class="field-controls">
+                                <input type="number" class="field-order-input" value="1" min="1" onchange="reorderFieldByNumber(this)" title="Field order" />
+                                <input type="number" class="field-order-input" value="1" min="1" onchange="reorderFieldByNumber(this)" title="Field order" />
+                                <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
+                                <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
+                            </div>
+                            <div class="editable-field" data-field-type="label">
+                                <div class="form-field">
+                                    <div class="form-label-only editable-label" contenteditable="true">New Label</div>
+                                </div>
+                            </div>
+                        </div>
+                    \`;
+                    break;
                 case 'text':
                     fieldHtml = \`
                         <div class="editable-field-wrapper" data-field-type="text" draggable="true" id="editable_${fieldId}">
                             <div class="field-controls">
+                                <input type="number" class="field-order-input" value="1" min="1" onchange="reorderFieldByNumber(this)" title="Field order" />
+                                <input type="number" class="field-order-input" value="1" min="1" onchange="reorderFieldByNumber(this)" title="Field order" />
                                 <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
                                 <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
                             </div>
@@ -3328,6 +3444,8 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                     fieldHtml = \`
                         <div class="editable-field-wrapper" data-field-type="textarea" draggable="true" id="editable_${fieldId}">
                             <div class="field-controls">
+                                <input type="number" class="field-order-input" value="1" min="1" onchange="reorderFieldByNumber(this)" title="Field order" />
+                                <input type="number" class="field-order-input" value="1" min="1" onchange="reorderFieldByNumber(this)" title="Field order" />
                                 <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
                                 <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
                             </div>
@@ -3344,6 +3462,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                     fieldHtml = \`
                         <div class="editable-field-wrapper" data-field-type="select" draggable="true" id="editable_${fieldId}">
                             <div class="field-controls">
+                                <input type="number" class="field-order-input" value="1" min="1" onchange="reorderFieldByNumber(this)" title="Field order" />
                                 <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
                                 <button class="field-control-btn edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                                 <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
@@ -3366,6 +3485,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                     fieldHtml = \`
                         <div class="editable-field-wrapper" data-field-type="radio" draggable="true" id="editable_${fieldId}">
                             <div class="field-controls">
+                                <input type="number" class="field-order-input" value="1" min="1" onchange="reorderFieldByNumber(this)" title="Field order" />
                                 <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
                                 <button class="field-control-btn edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                                 <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
@@ -3387,6 +3507,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                     fieldHtml = \`
                         <div class="editable-field-wrapper" data-field-type="checkbox" draggable="true" id="editable_${fieldId}">
                             <div class="field-controls">
+                                <input type="number" class="field-order-input" value="1" min="1" onchange="reorderFieldByNumber(this)" title="Field order" />
                                 <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
                                 <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
                             </div>
@@ -3403,6 +3524,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                     fieldHtml = \`
                         <div class="editable-field-wrapper" data-field-type="email" draggable="true" id="editable_${fieldId}">
                             <div class="field-controls">
+                                <input type="number" class="field-order-input" value="1" min="1" onchange="reorderFieldByNumber(this)" title="Field order" />
                                 <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
                                 <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
                             </div>
@@ -3419,6 +3541,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                     fieldHtml = \`
                         <div class="editable-field-wrapper" data-field-type="tel" draggable="true" id="editable_${fieldId}">
                             <div class="field-controls">
+                                <input type="number" class="field-order-input" value="1" min="1" onchange="reorderFieldByNumber(this)" title="Field order" />
                                 <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
                                 <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
                             </div>
@@ -3435,6 +3558,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                     fieldHtml = \`
                         <div class="editable-field-wrapper" data-field-type="date" draggable="true" id="editable_${fieldId}">
                             <div class="field-controls">
+                                <input type="number" class="field-order-input" value="1" min="1" onchange="reorderFieldByNumber(this)" title="Field order" />
                                 <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
                                 <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
                             </div>
@@ -3451,6 +3575,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                     fieldHtml = \`
                         <div class="editable-field-wrapper" data-field-type="number" draggable="true" id="editable_${fieldId}">
                             <div class="field-controls">
+                                <input type="number" class="field-order-input" value="1" min="1" onchange="reorderFieldByNumber(this)" title="Field order" />
                                 <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
                                 <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
                             </div>
@@ -3488,12 +3613,65 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
         }
 
         function addFieldToForm(fieldHtml) {
-            const addButton = document.getElementById('add-field-button');
-            if (addButton && addButton.parentNode) {
-                addButton.parentNode.insertBefore(createElementFromHTML(fieldHtml), addButton);
+            let newField;
+
+            // Check if we have a stored position for insertion
+            if (window.insertPosition) {
+                const { index, position } = window.insertPosition;
+                const container = document.querySelector('.document-content') || document.querySelector('main');
+                const wrappers = container ? container.querySelectorAll('.editable-field-wrapper') : [];
+
+                console.log(`🎯 Inserting field at index ${index}, position ${position}`);
+
+                if (container && wrappers.length > 0) {
+                    newField = createElementFromHTML(fieldHtml);
+
+                    if (position === 'before' && wrappers[index]) {
+                        // Insert before the specified wrapper
+                        wrappers[index].parentNode.insertBefore(newField, wrappers[index]);
+                    } else if (position === 'after' && wrappers[index - 1]) {
+                        // Insert after the specified wrapper (for 'after' position, index is offset by 1)
+                        const targetWrapper = wrappers[index - 1];
+                        targetWrapper.parentNode.insertBefore(newField, targetWrapper.nextSibling);
+                    } else {
+                        // Fallback: append to container
+                        const addButton = document.getElementById('add-field-button');
+                        if (addButton) {
+                            addButton.parentNode.insertBefore(newField, addButton);
+                        } else {
+                            container.appendChild(newField);
+                        }
+                    }
+                } else {
+                    // No existing wrappers, insert at beginning
+                    const container = document.querySelector('.document-content') || document.querySelector('main');
+                    if (container) {
+                        newField = createElementFromHTML(fieldHtml);
+                        const addButton = document.getElementById('add-field-button');
+                        if (addButton) {
+                            addButton.parentNode.insertBefore(newField, addButton);
+                        } else {
+                            container.appendChild(newField);
+                        }
+                    }
+                }
+
+                // Clear the stored position
+                window.insertPosition = null;
+            } else {
+                // Default behavior: add at the end
+                const addButton = document.getElementById('add-field-button');
+                if (addButton && addButton.parentNode) {
+                    addButton.parentNode.insertBefore(createElementFromHTML(fieldHtml), addButton);
+                    newField = addButton.previousElementSibling;
+                }
+            }
+
+            if (newField) {
                 // Re-initialize drag and drop for the new field using mouse-based system
-                const newField = addButton.previousElementSibling;
                 addDragFunctionality(newField);
+                // Update all field order numbers
+                updateFieldOrderNumbers();
                 // Recreate drop indicators to include the new field
                 createDropIndicators();
                 // Initialize editing for new editable elements
@@ -4065,6 +4243,83 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                     .options-btn-primary:hover {
                         background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
                         box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
+                    }
+
+                    /* Drop zone add button styles */
+                    .drop-zone-add-btn {
+                        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+                        color: white;
+                        border: none;
+                        padding: 0.75rem 1.5rem;
+                        border-radius: 8px;
+                        font-size: 0.875rem;
+                        font-weight: 500;
+                        cursor: pointer;
+                        transition: all 0.2s ease;
+                        margin-top: 1rem;
+                        box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
+                    }
+
+                    .drop-zone-add-btn:hover {
+                        background: linear-gradient(135deg, #059669 0%, #047857 100%);
+                        box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3);
+                        transform: translateY(-1px);
+                    }
+
+                    /* Label-only field styles */
+                    .form-label-only {
+                        font-weight: 600;
+                        font-size: 1.125rem;
+                        color: #374151;
+                        padding: 0.75rem 0;
+                        border-bottom: 2px solid #e5e7eb;
+                        margin-bottom: 1rem;
+                        display: block;
+                        min-height: 1.5rem;
+                    }
+
+                    .form-label-only:focus {
+                        outline: 2px solid #3b82f6;
+                        outline-offset: 2px;
+                        border-bottom-color: #3b82f6;
+                    }
+
+                    .form-label-only:empty:before {
+                        content: "Click to edit label";
+                        color: #9ca3af;
+                        font-style: italic;
+                    }
+
+                    /* Field order input styles */
+                    .field-order-input {
+                        width: 50px;
+                        padding: 0.25rem 0.5rem;
+                        border: 1px solid #d1d5db;
+                        border-radius: 6px;
+                        font-size: 0.875rem;
+                        font-weight: 500;
+                        text-align: center;
+                        background: white;
+                        color: #374151;
+                        transition: all 0.2s ease;
+                        margin-right: 0.5rem;
+                    }
+
+                    .field-order-input:focus {
+                        outline: none;
+                        border-color: #3b82f6;
+                        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+                    }
+
+                    .field-order-input:hover {
+                        border-color: #9ca3af;
+                    }
+
+                    /* Adjust field controls layout */
+                    .field-controls {
+                        display: flex;
+                        align-items: center;
+                        gap: 0.25rem;
                     }
                     .field-type-btn:hover {
                         border-color: #3b82f6;
