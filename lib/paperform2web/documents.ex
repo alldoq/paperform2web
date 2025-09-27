@@ -211,16 +211,54 @@ defmodule Paperform2web.Documents do
       IO.puts("  Section type: #{section["type"]}, form_field_id: #{section["form_field_id"]}")
     end)
 
-    # Keep only non-form-field sections (original AI-processed content)
+    # PROPER FIX: Only remove form sections that have form_field_id (user-added fields)
+    # Keep original AI-processed form structure (labels, titles, etc.)
+
+    # CORRECT APPROACH: Create a complete new sections array based on frontend ordering
+    # This rebuilds the entire form structure in the order specified by the frontend
+
+    # Create a mapping of field IDs to their new form sections
+    new_sections_by_id = Enum.reduce(new_form_sections, %{}, fn section, acc ->
+      field_id = section["form_field_id"]
+      Map.put(acc, field_id, section)
+    end)
+
+    # Create a mapping to track which frontend fields we've processed
+    frontend_field_ids = MapSet.new(Enum.map(unique_form_fields, fn field -> field["id"] end))
+
+    # Build the final sections array respecting frontend order
+    ordered_form_sections = Enum.map(unique_form_fields, fn field ->
+      field_id = field["id"]
+      Map.get(new_sections_by_id, field_id)
+    end)
+    |> Enum.filter(fn section -> section != nil end)
+
+    # Keep only non-form sections that don't conflict with our ordered fields
     preserved_sections = Enum.filter(existing_sections, fn section ->
       !Map.has_key?(section, "form_field_id")
     end)
-    IO.puts("Preserved sections count: #{length(preserved_sections)}")
-    IO.puts("New form sections count: #{length(new_form_sections)}")
 
-    # Combine preserved sections with new form sections
-    combined_sections = preserved_sections ++ new_form_sections
-    IO.puts("Combined sections count: #{length(combined_sections)}")
+    # Final structure: preserved content + ordered form sections
+    combined_sections = preserved_sections ++ ordered_form_sections
+
+    IO.puts("Preserved sections count: #{length(preserved_sections)}")
+    IO.puts("Ordered form sections count: #{length(ordered_form_sections)}")
+    IO.puts("Frontend ordered field IDs: #{inspect(Enum.map(unique_form_fields, &(&1["id"])))}")
+
+    IO.puts("=== ORDERED FORM STRUCTURE DEBUG ===")
+    IO.puts("Total sections: #{length(combined_sections)}")
+    IO.puts("Preserved sections: #{length(preserved_sections)}")
+    IO.puts("Ordered form sections: #{length(ordered_form_sections)}")
+    IO.puts("Final section order:")
+    combined_sections
+    |> Enum.take(15)
+    |> Enum.with_index()
+    |> Enum.each(fn {section, idx} ->
+      section_type = section["type"]
+      form_field_id = Map.get(section, "form_field_id", "N/A")
+      content_preview = String.slice(section["content"] || "", 0, 40)
+      IO.puts("  #{idx}: #{section_type} | #{form_field_id} | #{content_preview}...")
+    end)
     IO.puts("=== END DEBUG ===")
 
     # Print a sample of new form sections for debugging

@@ -1290,8 +1290,10 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             initializeThemeSelector();
             initializePreviewMode();
 
-            // Load existing form data
-            loadFormData();
+            // Load existing form data - with delay to ensure DOM is ready
+            setTimeout(() => {
+                loadFormData();
+            }, 500);
 
             // Auto-save changes
             setupAutoSave();
@@ -2491,12 +2493,124 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
         }
 
         function loadFormData() {
-            // Load form data from server or localStorage
+            // Load form data from server and reorder fields to match saved state
             const documentId = '#{document_id}';
             if (documentId) {
-                // In a real implementation, you'd load from server
                 console.log('Loading form data for document:', documentId);
+
+                fetch(\`/api/documents/\${documentId}\`)
+                .then(response => response.json())
+                .then(data => {
+                    console.log('📊 Raw response data:', data);
+
+                    if (data.form_data && Array.isArray(data.form_data)) {
+                        console.log('📊 Loaded form data:', data.form_data.length, 'items');
+
+                        // Sort form data by index to get correct order
+                        const sortedFormData = data.form_data.sort((a, b) => (a.index || 0) - (b.index || 0));
+                        console.log('📊 Sorted form data by index:', sortedFormData.map(item => ({ id: item.id, index: item.index })));
+
+                        // Reorder DOM elements to match saved order
+                        reorderDOMElements(sortedFormData);
+                    } else if (data.processed_data && data.processed_data.content && data.processed_data.content.sections) {
+                        console.log('📊 Found processed_data with sections:', data.processed_data.content.sections.length);
+
+                        // Try to extract form fields from sections and create ordering data
+                        const formFields = data.processed_data.content.sections
+                            .filter(section => section.type === 'form_input' && section.form_field_id)
+                            .map((section, index) => ({
+                                id: section.form_field_id,
+                                index: index,
+                                type: 'form_input'
+                            }));
+
+                        if (formFields.length > 0) {
+                            console.log('📊 Extracted form fields for reordering:', formFields);
+                            reorderDOMElements(formFields);
+                        }
+                    } else {
+                        console.log('📊 No form data found or invalid format');
+                    }
+                })
+                .catch(error => {
+                    console.error('Failed to load form data:', error);
+                });
             }
+        }
+
+        function reorderDOMElements(sortedFormData) {
+            const container = document.querySelector('.document-content') || document.querySelector('main');
+            if (!container) {
+                console.log('❌ No container found for reordering');
+                return;
+            }
+
+            // Create a map of current DOM elements by ID - try multiple strategies
+            const elementMap = new Map();
+            const wrappers = container.querySelectorAll('.editable-field-wrapper');
+
+            wrappers.forEach(wrapper => {
+                // Strategy 1: Look for field inside wrapper
+                const field = wrapper.querySelector('.editable-field');
+                if (field && field.id) {
+                    elementMap.set(field.id, wrapper);
+                    console.log('🔍 Mapped field:', field.id, 'to wrapper');
+                }
+
+                // Strategy 2: Check if wrapper itself has the ID pattern
+                if (wrapper.id && wrapper.id.startsWith('editable_')) {
+                    elementMap.set(wrapper.id, wrapper);
+                    console.log('🔍 Mapped wrapper:', wrapper.id);
+                }
+
+                // Strategy 3: Look for any element with editable_ ID pattern inside wrapper
+                const editableElements = wrapper.querySelectorAll('[id*="editable_"]');
+                editableElements.forEach(el => {
+                    if (el.id) {
+                        elementMap.set(el.id, wrapper);
+                        console.log('🔍 Mapped nested element:', el.id, 'to wrapper');
+                    }
+                });
+            });
+
+            console.log('🔧 Found', elementMap.size, 'elements to reorder');
+            console.log('🔧 Element map keys:', Array.from(elementMap.keys()));
+            console.log('🔧 Form data IDs to reorder:', sortedFormData.map(item => item.id));
+
+            // Find and preserve the Add Field button
+            const addButton = container.querySelector('.add-field-btn');
+            if (addButton) {
+                addButton.remove();
+            }
+
+            // Remove all wrappers from container temporarily
+            const allWrappers = Array.from(wrappers);
+            allWrappers.forEach(wrapper => wrapper.remove());
+
+            // Re-insert elements in the correct order based on saved data
+            let reorderedCount = 0;
+            sortedFormData.forEach((item, index) => {
+                if (item.id && elementMap.has(item.id)) {
+                    const wrapper = elementMap.get(item.id);
+                    container.appendChild(wrapper);
+                    console.log(\`✅ Moved \${item.id} to position \${index}\`);
+                    reorderedCount++;
+                } else {
+                    console.log(\`❌ Could not find element for ID: \${item.id}\`);
+                }
+            });
+
+            console.log(\`🎯 Reordered \${reorderedCount} out of \${sortedFormData.length} elements\`);
+
+            // Re-add the Add Field button at the end
+            if (addButton) {
+                container.appendChild(addButton);
+            }
+
+            // Re-create drop indicators with new order
+            createDropIndicators();
+
+            console.log('🎯 DOM reordering complete');
         }
 
         function saveFormData() {
@@ -2608,6 +2722,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             // Collect form state based on current DOM order - look for wrappers first, then inner fields
             const formWrappers = document.querySelectorAll('.editable-field-wrapper');
             const state = [];
+            const seenFieldNames = new Set(); // Track field names to prevent duplicates
 
             console.log('🔍 COLLECTING FORM STATE - Found wrappers:', formWrappers.length);
             console.log('🔍 Current DOM order:');
@@ -2647,6 +2762,24 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                 const fieldType = fieldElement.dataset.fieldType || element.dataset.fieldType || 'text';
                 const fieldName = fieldElement.querySelector('input, textarea, select')?.name || \`field_\${index}\`;
 
+                // Skip duplicates - check if we've already processed this field name
+                // Remove editable_ prefixes to get clean field name for comparison
+                const cleanFieldName = fieldName.replace(/^editable_+/, '');
+                const elementId = fieldElement.id || element.id || '';
+                const cleanElementId = elementId.replace(/^editable_+/, '');
+
+                // Skip if we've already seen this field name or if this looks like a duplicate
+                if (seenFieldNames.has(cleanFieldName) || seenFieldNames.has(cleanElementId)) {
+                    console.log(\`⚠️ Skipping duplicate field: \${fieldName} (ID: \${elementId})\`);
+                    return;
+                }
+
+                // Add to seen set using both field name and clean ID
+                seenFieldNames.add(cleanFieldName);
+                if (cleanElementId) {
+                    seenFieldNames.add(cleanElementId);
+                }
+
                 // Try multiple ways to get the field content, preserving original labels
                 let fieldContent = fieldElement.querySelector('.editable-label')?.textContent?.trim() ||
                                  fieldElement.querySelector('label')?.textContent?.trim() ||
@@ -2680,17 +2813,19 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                 }
 
                 const fieldData = {
-                    index: index,
+                    index: state.length,  // Use state length for proper sequential indexing
                     type: 'form_input',  // Mark as form input so it gets processed correctly
                     content: fieldContent,
                     id: fieldElement.id,
                     metadata: {
                         input_type: fieldType,  // Store the actual field type here
-                        field_name: fieldName,
+                        field_name: cleanFieldName,  // Use clean field name
                         required: fieldElement.dataset.required === 'true',
                         options: options.length > 0 ? options : undefined  // Only include options if they exist
                     }
                 };
+
+                console.log(\`✅ Including field: \${fieldName} (ID: \${fieldElement.id}) - Clean name: \${cleanFieldName}\`);
 
                 // Debug logging for radio fields
                 if (fieldType === 'radio') {
@@ -3096,14 +3231,20 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                 ).join('');
 
                 fieldHtml = \`
-                    <div class="editable-field" data-field-type="select" draggable="true" id="editable_${fieldId}" data-options='${JSON.stringify(options)}'>
-                        <div class="form-field">
-                            <label for="${fieldId}" class="form-label editable-label" contenteditable="true">${escapeHtml(fieldLabel)}</label>
-                            <select id="${fieldId}" name="${fieldName}" class="editable-select">
-                                <option value="">Choose an option</option>
-                                ${optionsHtml}
-                            </select>
-                            <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
+                    <div class="editable-field-wrapper" data-field-type="select" draggable="true" id="editable_${fieldId}">
+                        <div class="field-controls">
+                            <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
+                            <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
+                        </div>
+                        <div class="editable-field" data-field-type="select" data-options='${JSON.stringify(options)}'>
+                            <div class="form-field">
+                                <label for="${fieldId}" class="form-label editable-label" contenteditable="true">${escapeHtml(fieldLabel)}</label>
+                                <select id="${fieldId}" name="${fieldName}" class="editable-select">
+                                    <option value="">Choose an option</option>
+                                    ${optionsHtml}
+                                </select>
+                                <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
+                            </div>
                         </div>
                     </div>
                 \`;
@@ -3113,13 +3254,19 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                 ).join('');
 
                 fieldHtml = \`
-                    <div class="editable-field" data-field-type="radio" draggable="true" id="editable_${fieldId}" data-options='${JSON.stringify(options)}'>
-                        <div class="form-field">
-                            <div class="form-question editable-label" contenteditable="true">${escapeHtml(fieldLabel)}</div>
-                            <div class="radio-options">
-                                ${radioButtonsHtml}
+                    <div class="editable-field-wrapper" data-field-type="radio" draggable="true" id="editable_${fieldId}">
+                        <div class="field-controls">
+                            <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
+                            <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
+                        </div>
+                        <div class="editable-field" data-field-type="radio" data-options='${JSON.stringify(options)}'>
+                            <div class="form-field">
+                                <div class="form-question editable-label" contenteditable="true">${escapeHtml(fieldLabel)}</div>
+                                <div class="radio-options">
+                                    ${radioButtonsHtml}
+                                </div>
+                                <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                             </div>
-                            <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                         </div>
                     </div>
                 \`;
@@ -3139,101 +3286,155 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             switch (fieldType) {
                 case 'text':
                     fieldHtml = \`
-                        <div class="editable-field" data-field-type="text" data-original-label="New Text Field" draggable="true" id="editable_${fieldId}">
-                            <div class="form-field">
-                                <label for="${fieldId}" class="form-label editable-label" contenteditable="true">New Text Field</label>
-                                <input type="text" id="${fieldId}" name="${fieldName}" class="editable-input" placeholder="Enter text...">
+                        <div class="editable-field-wrapper" data-field-type="text" draggable="true" id="editable_${fieldId}">
+                            <div class="field-controls">
+                                <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
+                                <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
+                            </div>
+                            <div class="editable-field" data-field-type="text">
+                                <div class="form-field">
+                                    <label for="${fieldId}" class="form-label editable-label" contenteditable="true">New Text Field</label>
+                                    <input type="text" id="${fieldId}" name="${fieldName}" class="editable-input" placeholder="Enter text...">
+                                </div>
                             </div>
                         </div>
                     \`;
                     break;
                 case 'textarea':
                     fieldHtml = \`
-                        <div class="editable-field" data-field-type="textarea" draggable="true" id="editable_${fieldId}">
-                            <div class="form-field">
-                                <label for="${fieldId}" class="form-label editable-label" contenteditable="true">New Text Area</label>
-                                <textarea id="${fieldId}" name="${fieldName}" class="editable-textarea" rows="4" placeholder="Enter text..."></textarea>
+                        <div class="editable-field-wrapper" data-field-type="textarea" draggable="true" id="editable_${fieldId}">
+                            <div class="field-controls">
+                                <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
+                                <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
+                            </div>
+                            <div class="editable-field" data-field-type="textarea">
+                                <div class="form-field">
+                                    <label for="${fieldId}" class="form-label editable-label" contenteditable="true">New Text Area</label>
+                                    <textarea id="${fieldId}" name="${fieldName}" class="editable-textarea" rows="4" placeholder="Enter text..."></textarea>
+                                </div>
                             </div>
                         </div>
                     \`;
                     break;
                 case 'select':
                     fieldHtml = \`
-                        <div class="editable-field" data-field-type="select" draggable="true" id="editable_${fieldId}" data-options='["Option 1", "Option 2", "Option 3"]'>
-                            <div class="form-field">
-                                <label for="${fieldId}" class="form-label editable-label" contenteditable="true">New Dropdown</label>
-                                <select id="${fieldId}" name="${fieldName}" class="editable-select">
-                                    <option value="">Choose an option</option>
-                                    <option value="Option 1">Option 1</option>
-                                    <option value="Option 2">Option 2</option>
-                                    <option value="Option 3">Option 3</option>
-                                </select>
-                                <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
+                        <div class="editable-field-wrapper" data-field-type="select" draggable="true" id="editable_${fieldId}">
+                            <div class="field-controls">
+                                <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
+                                <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
+                            </div>
+                            <div class="editable-field" data-field-type="select" data-options='["Option 1", "Option 2", "Option 3"]'>
+                                <div class="form-field">
+                                    <label for="${fieldId}" class="form-label editable-label" contenteditable="true">New Dropdown</label>
+                                    <select id="${fieldId}" name="${fieldName}" class="editable-select">
+                                        <option value="">Choose an option</option>
+                                        <option value="Option 1">Option 1</option>
+                                        <option value="Option 2">Option 2</option>
+                                        <option value="Option 3">Option 3</option>
+                                    </select>
+                                    <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
+                                </div>
                             </div>
                         </div>
                     \`;
                     break;
                 case 'radio':
                     fieldHtml = \`
-                        <div class="editable-field" data-field-type="radio" draggable="true" id="editable_${fieldId}" data-options='["Option 1", "Option 2", "Option 3"]'>
-                            <div class="form-field">
-                                <div class="form-question editable-label" contenteditable="true">New Radio Group</div>
-                                <div class="radio-options">
-                                    <label><input type="radio" name="${fieldName}" value="Option 1"> Option 1</label>
-                                    <label><input type="radio" name="${fieldName}" value="Option 2"> Option 2</label>
-                                    <label><input type="radio" name="${fieldName}" value="Option 3"> Option 3</label>
+                        <div class="editable-field-wrapper" data-field-type="radio" draggable="true" id="editable_${fieldId}">
+                            <div class="field-controls">
+                                <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
+                                <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
+                            </div>
+                            <div class="editable-field" data-field-type="radio" data-options='["Option 1", "Option 2", "Option 3"]'>
+                                <div class="form-field">
+                                    <div class="form-question editable-label" contenteditable="true">New Radio Group</div>
+                                    <div class="radio-options">
+                                        <label><input type="radio" name="${fieldName}" value="Option 1"> Option 1</label>
+                                        <label><input type="radio" name="${fieldName}" value="Option 2"> Option 2</label>
+                                        <label><input type="radio" name="${fieldName}" value="Option 3"> Option 3</label>
+                                    </div>
+                                    <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                                 </div>
-                                <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                             </div>
                         </div>
                     \`;
                     break;
                 case 'checkbox':
                     fieldHtml = \`
-                        <div class="editable-field" data-field-type="checkbox" draggable="true" id="editable_${fieldId}">
-                            <div class="form-field checkbox-field">
-                                <input type="checkbox" id="${fieldId}" name="${fieldName}" value="checked">
-                                <label for="${fieldId}" class="editable-label" contenteditable="true">New Checkbox</label>
+                        <div class="editable-field-wrapper" data-field-type="checkbox" draggable="true" id="editable_${fieldId}">
+                            <div class="field-controls">
+                                <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
+                                <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
+                            </div>
+                            <div class="editable-field" data-field-type="checkbox">
+                                <div class="form-field checkbox-field">
+                                    <input type="checkbox" id="${fieldId}" name="${fieldName}" value="checked">
+                                    <label for="${fieldId}" class="editable-label" contenteditable="true">New Checkbox</label>
+                                </div>
                             </div>
                         </div>
                     \`;
                     break;
                 case 'email':
                     fieldHtml = \`
-                        <div class="editable-field" data-field-type="email" draggable="true" id="editable_${fieldId}">
-                            <div class="form-field">
-                                <label for="${fieldId}" class="form-label editable-label" contenteditable="true">Email Address</label>
-                                <input type="email" id="${fieldId}" name="${fieldName}" class="editable-input" placeholder="Enter email...">
+                        <div class="editable-field-wrapper" data-field-type="email" draggable="true" id="editable_${fieldId}">
+                            <div class="field-controls">
+                                <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
+                                <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
+                            </div>
+                            <div class="editable-field" data-field-type="email">
+                                <div class="form-field">
+                                    <label for="${fieldId}" class="form-label editable-label" contenteditable="true">Email Address</label>
+                                    <input type="email" id="${fieldId}" name="${fieldName}" class="editable-input" placeholder="Enter email...">
+                                </div>
                             </div>
                         </div>
                     \`;
                     break;
                 case 'tel':
                     fieldHtml = \`
-                        <div class="editable-field" data-field-type="tel" draggable="true" id="editable_${fieldId}">
-                            <div class="form-field">
-                                <label for="${fieldId}" class="form-label editable-label" contenteditable="true">Phone Number</label>
-                                <input type="tel" id="${fieldId}" name="${fieldName}" class="editable-input" placeholder="Enter phone...">
+                        <div class="editable-field-wrapper" data-field-type="tel" draggable="true" id="editable_${fieldId}">
+                            <div class="field-controls">
+                                <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
+                                <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
+                            </div>
+                            <div class="editable-field" data-field-type="tel">
+                                <div class="form-field">
+                                    <label for="${fieldId}" class="form-label editable-label" contenteditable="true">Phone Number</label>
+                                    <input type="tel" id="${fieldId}" name="${fieldName}" class="editable-input" placeholder="Enter phone...">
+                                </div>
                             </div>
                         </div>
                     \`;
                     break;
                 case 'date':
                     fieldHtml = \`
-                        <div class="editable-field" data-field-type="date" draggable="true" id="editable_${fieldId}">
-                            <div class="form-field">
-                                <label for="${fieldId}" class="form-label editable-label" contenteditable="true">Date</label>
-                                <input type="date" id="${fieldId}" name="${fieldName}" class="editable-input">
+                        <div class="editable-field-wrapper" data-field-type="date" draggable="true" id="editable_${fieldId}">
+                            <div class="field-controls">
+                                <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
+                                <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
+                            </div>
+                            <div class="editable-field" data-field-type="date">
+                                <div class="form-field">
+                                    <label for="${fieldId}" class="form-label editable-label" contenteditable="true">Date</label>
+                                    <input type="date" id="${fieldId}" name="${fieldName}" class="editable-input">
+                                </div>
                             </div>
                         </div>
                     \`;
                     break;
                 case 'number':
                     fieldHtml = \`
-                        <div class="editable-field" data-field-type="number" draggable="true" id="editable_${fieldId}">
-                            <div class="form-field">
-                                <label for="${fieldId}" class="form-label editable-label" contenteditable="true">Number</label>
-                                <input type="number" id="${fieldId}" name="${fieldName}" class="editable-input" placeholder="Enter number...">
+                        <div class="editable-field-wrapper" data-field-type="number" draggable="true" id="editable_${fieldId}">
+                            <div class="field-controls">
+                                <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
+                                <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
+                            </div>
+                            <div class="editable-field" data-field-type="number">
+                                <div class="form-field">
+                                    <label for="${fieldId}" class="form-label editable-label" contenteditable="true">Number</label>
+                                    <input type="number" id="${fieldId}" name="${fieldName}" class="editable-input" placeholder="Enter number...">
+                                </div>
                             </div>
                         </div>
                     \`;
