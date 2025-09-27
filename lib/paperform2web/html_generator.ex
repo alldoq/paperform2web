@@ -181,10 +181,14 @@ defmodule Paperform2web.HtmlGenerator do
       field_id = "editable_#{field_name}_#{index}"
 
       # Generate the editable wrapper with drag and drop functionality
+      input_type = get_in(section, ["metadata", "input_type"])
+      has_options = input_type in ["select", "radio"]
+
       """
       <div class="editable-field-wrapper" data-field-type="#{type}" draggable="true" id="#{field_id}">
         <div class="field-controls">
           <button class="field-control-btn edit-btn" onclick="editField('#{field_id}')" title="Edit field">✏️</button>
+          #{if has_options, do: "<button class=\"field-control-btn edit-options-btn\" onclick=\"editFieldOptions(this)\" title=\"Edit options\">⋯</button>", else: ""}
           <button class="field-control-btn delete-btn" onclick="deleteField('#{field_id}')" title="Delete field">🗑️</button>
         </div>
         #{FormGeneration.generate_form_section(section, index, &build_css_classes/2, &build_inline_styles/2, &ContentGeneration.escape_html/1, true)}

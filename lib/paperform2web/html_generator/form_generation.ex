@@ -198,7 +198,6 @@ defmodule Paperform2web.HtmlGenerator.FormGeneration do
                 <div class="radio-options">
                   #{radio_buttons}
                 </div>
-                <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
               </div>
             </div>
             """
@@ -268,7 +267,6 @@ defmodule Paperform2web.HtmlGenerator.FormGeneration do
                       <option value="">Choose an option</option>
                       #{options_html}
                   </select>
-                  <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
               </div>
           </div>
           """

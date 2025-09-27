@@ -1290,6 +1290,9 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             initializeThemeSelector();
             initializePreviewMode();
 
+            // Clean up any duplicate edit options buttons from legacy fields
+            cleanupDuplicateEditButtons();
+
             // Load existing form data - with delay to ensure DOM is ready
             setTimeout(() => {
                 loadFormData();
@@ -1297,6 +1300,27 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
 
             // Auto-save changes
             setupAutoSave();
+        }
+
+        function cleanupDuplicateEditButtons() {
+            // Remove any edit options buttons that are inside form fields (legacy structure)
+            // Keep only the ones in field controls
+            const formFieldButtons = document.querySelectorAll('.form-field .edit-options-btn');
+            console.log(`🧹 Removing ${formFieldButtons.length} duplicate edit options buttons from form fields`);
+
+            formFieldButtons.forEach(button => {
+                button.remove();
+            });
+
+            // Also remove any standalone edit options buttons that might be floating
+            const allEditButtons = document.querySelectorAll('.edit-options-btn');
+            allEditButtons.forEach(button => {
+                // Keep only buttons that are direct children of field-controls
+                if (!button.closest('.field-controls')) {
+                    console.log('🧹 Removing orphaned edit options button:', button);
+                    button.remove();
+                }
+            });
         }
 
         // Drop indicator management
@@ -3234,6 +3258,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                     <div class="editable-field-wrapper" data-field-type="select" draggable="true" id="editable_${fieldId}">
                         <div class="field-controls">
                             <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
+                            <button class="field-control-btn edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                             <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
                         </div>
                         <div class="editable-field" data-field-type="select" data-options='${JSON.stringify(options)}'>
@@ -3243,7 +3268,6 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                                     <option value="">Choose an option</option>
                                     ${optionsHtml}
                                 </select>
-                                <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                             </div>
                         </div>
                     </div>
@@ -3257,6 +3281,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                     <div class="editable-field-wrapper" data-field-type="radio" draggable="true" id="editable_${fieldId}">
                         <div class="field-controls">
                             <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
+                            <button class="field-control-btn edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                             <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
                         </div>
                         <div class="editable-field" data-field-type="radio" data-options='${JSON.stringify(options)}'>
@@ -3265,7 +3290,6 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                                 <div class="radio-options">
                                     ${radioButtonsHtml}
                                 </div>
-                                <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                             </div>
                         </div>
                     </div>
@@ -3321,6 +3345,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                         <div class="editable-field-wrapper" data-field-type="select" draggable="true" id="editable_${fieldId}">
                             <div class="field-controls">
                                 <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
+                                <button class="field-control-btn edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                                 <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
                             </div>
                             <div class="editable-field" data-field-type="select" data-options='["Option 1", "Option 2", "Option 3"]'>
@@ -3332,7 +3357,6 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                                         <option value="Option 2">Option 2</option>
                                         <option value="Option 3">Option 3</option>
                                     </select>
-                                    <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                                 </div>
                             </div>
                         </div>
@@ -3343,6 +3367,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                         <div class="editable-field-wrapper" data-field-type="radio" draggable="true" id="editable_${fieldId}">
                             <div class="field-controls">
                                 <button class="field-control-btn edit-btn" onclick="editField('editable_${fieldId}')" title="Edit field">✏️</button>
+                                <button class="field-control-btn edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                                 <button class="field-control-btn delete-btn" onclick="deleteField(this)" title="Delete field">🗑️</button>
                             </div>
                             <div class="editable-field" data-field-type="radio" data-options='["Option 1", "Option 2", "Option 3"]'>
@@ -3353,7 +3378,6 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                                         <label><input type="radio" name="${fieldName}" value="Option 2"> Option 2</label>
                                         <label><input type="radio" name="${fieldName}" value="Option 3"> Option 3</label>
                                     </div>
-                                    <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                                 </div>
                             </div>
                         </div>
@@ -3485,7 +3509,9 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
         }
 
         function editFieldOptions(button) {
-            const field = button.closest('.editable-field');
+            // Find the wrapper first, then the field inside it
+            const wrapper = button.closest('.editable-field-wrapper');
+            const field = wrapper ? wrapper.querySelector('.editable-field') : button.closest('.editable-field');
             const fieldType = field.dataset.fieldType;
 
             if (fieldType !== 'select' && fieldType !== 'radio') {
@@ -3508,25 +3534,29 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
 
             // Create options edit modal
             const modalHtml = \`
-                <div id="edit-options-modal" class="modal-overlay">
-                    <div class="modal">
-                        <div class="modal-header">
-                            <h3>Edit ${fieldType === 'select' ? 'Dropdown' : 'Radio Group'} Options</h3>
-                            <button class="close-btn" onclick="closeEditOptionsDialog()">&times;</button>
+                <div id="edit-options-modal" class="options-modal-overlay">
+                    <div class="options-modal">
+                        <div class="options-modal-header">
+                            <div class="options-modal-title">
+                                <span class="options-modal-icon">${fieldType === 'select' ? '📋' : '⚪'}</span>
+                                <h3>Edit ${fieldType === 'select' ? 'Dropdown' : 'Radio Group'}</h3>
+                            </div>
+                            <button class="options-close-btn" onclick="closeEditOptionsDialog()" title="Close">✕</button>
                         </div>
-                        <div class="modal-body">
-                            <div class="field-label-section">
-                                <label for="edit-field-label-input">Field Label:</label>
-                                <input type="text" id="edit-field-label-input" value="${escapeHtml(currentLabel)}">
+                        <div class="options-modal-body">
+                            <div class="options-form-group">
+                                <label for="edit-field-label-input" class="options-label">Field Label</label>
+                                <input type="text" id="edit-field-label-input" class="options-input" value="${escapeHtml(currentLabel)}" placeholder="Enter field label">
                             </div>
-                            <div class="options-list">
-                                <label>Options (one per line):</label>
-                                <textarea id="edit-options-textarea" rows="6">${optionsText}</textarea>
+                            <div class="options-form-group">
+                                <label for="edit-options-textarea" class="options-label">Options</label>
+                                <textarea id="edit-options-textarea" class="options-textarea" rows="5" placeholder="Enter one option per line">${optionsText}</textarea>
+                                <div class="options-help">One option per line</div>
                             </div>
-                            <div class="modal-actions">
-                                <button id="update-options-btn" class="btn btn-primary">Update Options</button>
-                                <button onclick="closeEditOptionsDialog()" class="btn btn-secondary">Cancel</button>
-                            </div>
+                        </div>
+                        <div class="options-modal-footer">
+                            <button onclick="closeEditOptionsDialog()" class="options-btn options-btn-cancel">Cancel</button>
+                            <button id="update-options-btn" class="options-btn options-btn-primary">Update</button>
                         </div>
                     </div>
                 </div>
@@ -3592,14 +3622,16 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
         }
 
         function editField(fieldId) {
-            const field = document.getElementById(fieldId);
-            if (!field) return;
+            const fieldWrapper = document.getElementById(fieldId);
+            if (!fieldWrapper) return;
 
-            const fieldType = field.dataset.fieldType;
+            // Get the actual field element (may be the wrapper or inner field)
+            const field = fieldWrapper.querySelector('.editable-field') || fieldWrapper;
+            const fieldType = field.dataset.fieldType || fieldWrapper.dataset.fieldType;
 
             // For radio and select fields, use the options editor
             if (fieldType === 'select' || fieldType === 'radio') {
-                const editBtn = field.querySelector('.edit-options-btn');
+                const editBtn = fieldWrapper.querySelector('.edit-options-btn');
                 if (editBtn) {
                     editFieldOptions(editBtn);
                 }
@@ -3629,9 +3661,11 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
 
         function deleteField(button) {
             if (confirm('Are you sure you want to delete this field?')) {
-                const field = button.closest('.editable-field');
-                if (field) {
-                    field.remove();
+                // Look for the wrapper first, then fall back to the field
+                const wrapper = button.closest('.editable-field-wrapper');
+                const elementToRemove = wrapper || button.closest('.editable-field');
+                if (elementToRemove) {
+                    elementToRemove.remove();
                     saveFormData();
                 }
             }
@@ -3838,10 +3872,199 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                         font-size: 1rem;
                         text-align: left;
                         font-weight: 500;
-                        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-                        position: relative;
-                        justify-content: flex-start;
+                    }
+
+                    /* Enhanced Options Modal Styles */
+                    .options-modal-overlay {
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
+                        background: rgba(0, 0, 0, 0.4);
+                        backdrop-filter: blur(8px);
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        z-index: 1000;
+                        animation: fadeIn 0.2s ease-out;
+                    }
+
+                    @keyframes fadeIn {
+                        from { opacity: 0; }
+                        to { opacity: 1; }
+                    }
+
+                    @keyframes slideIn {
+                        from {
+                            opacity: 0;
+                            transform: translateY(-20px) scale(0.95);
+                        }
+                        to {
+                            opacity: 1;
+                            transform: translateY(0) scale(1);
+                        }
+                    }
+
+                    .options-modal {
+                        background: white;
+                        border-radius: 16px;
+                        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+                        width: 90%;
+                        max-width: 480px;
+                        max-height: 90vh;
+                        overflow: hidden;
+                        animation: slideIn 0.3s ease-out;
+                        border: 1px solid #f1f5f9;
+                    }
+
+                    .options-modal-header {
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        padding: 1.5rem 2rem;
+                        border-bottom: 1px solid #f1f5f9;
+                        background: linear-gradient(135deg, #fafbfc 0%, #f8fafc 100%);
+                    }
+
+                    .options-modal-title {
+                        display: flex;
+                        align-items: center;
                         gap: 0.75rem;
+                    }
+
+                    .options-modal-icon {
+                        font-size: 1.25rem;
+                    }
+
+                    .options-modal-title h3 {
+                        margin: 0;
+                        font-size: 1.125rem;
+                        font-weight: 600;
+                        color: #1f2937;
+                        letter-spacing: -0.025em;
+                    }
+
+                    .options-close-btn {
+                        background: none;
+                        border: none;
+                        font-size: 1.25rem;
+                        cursor: pointer;
+                        color: #6b7280;
+                        padding: 0.5rem;
+                        border-radius: 8px;
+                        transition: all 0.2s ease;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        width: 2rem;
+                        height: 2rem;
+                    }
+
+                    .options-close-btn:hover {
+                        background-color: #f3f4f6;
+                        color: #374151;
+                    }
+
+                    .options-modal-body {
+                        padding: 2rem;
+                    }
+
+                    .options-form-group {
+                        margin-bottom: 1.5rem;
+                    }
+
+                    .options-form-group:last-child {
+                        margin-bottom: 0;
+                    }
+
+                    .options-label {
+                        display: block;
+                        margin-bottom: 0.75rem;
+                        font-weight: 500;
+                        color: #374151;
+                        font-size: 0.875rem;
+                        text-transform: uppercase;
+                        letter-spacing: 0.05em;
+                    }
+
+                    .options-input,
+                    .options-textarea {
+                        width: 100%;
+                        padding: 0.875rem 1rem;
+                        border: 1.5px solid #e5e7eb;
+                        border-radius: 12px;
+                        font-size: 0.925rem;
+                        transition: all 0.2s ease;
+                        background: white;
+                        box-sizing: border-box;
+                        font-family: inherit;
+                    }
+
+                    .options-input:focus,
+                    .options-textarea:focus {
+                        outline: none;
+                        border-color: #3b82f6;
+                        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+                    }
+
+                    .options-textarea {
+                        resize: vertical;
+                        min-height: 120px;
+                        line-height: 1.5;
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    }
+
+                    .options-help {
+                        margin-top: 0.5rem;
+                        font-size: 0.8rem;
+                        color: #6b7280;
+                        font-style: italic;
+                    }
+
+                    .options-modal-footer {
+                        padding: 1.5rem 2rem;
+                        background: #fafbfc;
+                        border-top: 1px solid #f1f5f9;
+                        display: flex;
+                        justify-content: flex-end;
+                        gap: 0.75rem;
+                    }
+
+                    .options-btn {
+                        padding: 0.75rem 1.5rem;
+                        border: none;
+                        border-radius: 8px;
+                        font-size: 0.875rem;
+                        font-weight: 500;
+                        cursor: pointer;
+                        transition: all 0.2s ease;
+                        min-width: 80px;
+                        display: inline-flex;
+                        align-items: center;
+                        justify-content: center;
+                    }
+
+                    .options-btn-cancel {
+                        background: white;
+                        color: #6b7280;
+                        border: 1px solid #d1d5db;
+                    }
+
+                    .options-btn-cancel:hover {
+                        background: #f9fafb;
+                        color: #374151;
+                    }
+
+                    .options-btn-primary {
+                        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+                        color: white;
+                        box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
+                    }
+
+                    .options-btn-primary:hover {
+                        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+                        box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
                     }
                     .field-type-btn:hover {
                         border-color: #3b82f6;
