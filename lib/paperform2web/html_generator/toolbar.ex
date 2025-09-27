@@ -46,6 +46,7 @@ defmodule Paperform2web.HtmlGenerator.Toolbar do
                 <button id="save-form" class="btn btn-primary">Save Changes</button>
                 <button id="reset-form" class="btn btn-secondary">Reset</button>
                 <button id="add-field" class="btn btn-secondary">Add Field</button>
+                <button id="clear-all-fields" class="btn btn-danger">Clear All Fields</button>
                 #{generate_style_selector()}
             </div>
         </div>
@@ -147,6 +148,16 @@ defmodule Paperform2web.HtmlGenerator.Toolbar do
             border-color: #9ca3af;
         }
 
+        .btn-danger {
+            background: #dc2626;
+            color: white;
+            border-color: #dc2626;
+        }
+        .btn-danger:hover {
+            background: #b91c1c;
+            border-color: #b91c1c;
+        }
+
         /* Style Selector */
         .style-selector {
             display: flex;
@@ -241,7 +252,231 @@ defmodule Paperform2web.HtmlGenerator.Toolbar do
             z-index: 100;
         }
 
-        /* CSS drag handle removed - using JavaScript-created handle instead */
+        /* Drag Handle Styles - positioned relative to wrapper */
+        .editable-field-wrapper {
+            position: relative;
+            padding-left: 2.5rem; /* Make room for drag handle */
+        }
+
+        .drag-handle {
+            position: absolute;
+            top: 50%;
+            left: 5px;
+            transform: translateY(-50%);
+            cursor: grab;
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+            padding: 10px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            z-index: 10;
+            user-select: none;
+            box-shadow: 0 3px 12px rgba(52, 152, 219, 0.4);
+            border: 2px solid rgba(255,255,255,0.3);
+            transition: all 0.2s ease;
+            opacity: 0.7;
+        }
+
+        .drag-handle:hover {
+            opacity: 1;
+            transform: translateY(-50%) scale(1.1);
+            box-shadow: 0 5px 20px rgba(52, 152, 219, 0.6);
+        }
+
+        .drag-handle:active {
+            cursor: grabbing;
+        }
+
+        /* Dragging State Styles */
+        .dragging-active {
+            user-select: none;
+        }
+
+        .dragging-active .editable-field-wrapper {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .dragging-active .editable-field-wrapper:not(.drag-over) {
+            opacity: 0.7;
+            transform: scale(0.98);
+        }
+
+        /* Enhanced Drop Zone Styles */
+        .drop-zone {
+            position: relative;
+            min-height: 60px;
+            margin: 8px 0;
+            background: linear-gradient(135deg, rgba(52, 152, 219, 0.1) 0%, rgba(41, 128, 185, 0.15) 100%);
+            border: 2px dashed rgba(52, 152, 219, 0.4);
+            border-radius: 12px;
+            opacity: 0;
+            transform: scale(0.95) translateY(-5px);
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            pointer-events: none;
+            z-index: 5;
+            backdrop-filter: blur(8px);
+            overflow: hidden;
+        }
+
+        .drop-zone.active {
+            opacity: 1;
+            transform: scale(1) translateY(0);
+            animation: dropZonePulse 2s ease-in-out infinite;
+        }
+
+        @keyframes dropZonePulse {
+            0%, 100% {
+                border-color: rgba(52, 152, 219, 0.4);
+                box-shadow: 0 4px 20px rgba(52, 152, 219, 0.2);
+            }
+            50% {
+                border-color: rgba(52, 152, 219, 0.8);
+                box-shadow: 0 8px 32px rgba(52, 152, 219, 0.4);
+            }
+        }
+
+        .drop-zone::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(52, 152, 219, 0.3), transparent);
+            animation: dropZoneShimmer 3s infinite;
+        }
+
+        @keyframes dropZoneShimmer {
+            0% { left: -100%; }
+            100% { left: 100%; }
+        }
+
+        .drop-zone-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            width: 100%;
+            padding: 10px;
+        }
+
+        .drop-zone-icon {
+            font-size: 24px;
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .drop-zone-text {
+            color: #3498db;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 4px;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+        }
+
+        .drop-zone-subtext {
+            color: rgba(52, 152, 219, 0.8);
+            font-size: 12px;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.3s ease;
+        }
+
+        .drop-zone.active .drop-zone-subtext {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .drop-zone::after {
+            content: '';
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 8px;
+            height: 8px;
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            border-radius: 50%;
+            animation: dropZoneDot 1.5s ease-in-out infinite;
+        }
+
+        @keyframes dropZoneDot {
+            0%, 100% {
+                transform: scale(1);
+                opacity: 0.6;
+            }
+            50% {
+                transform: scale(1.5);
+                opacity: 1;
+            }
+        }
+
+        /* Alternative compact drop line for tight spaces */
+        .drop-line {
+            position: relative;
+            height: 8px;
+            margin: 6px 0;
+            background: linear-gradient(90deg, #3498db 0%, #2980b9 50%, #3498db 100%);
+            background-size: 200% 100%;
+            border-radius: 4px;
+            opacity: 0;
+            transform: scaleX(0) translateY(-5px);
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            pointer-events: none;
+            z-index: 5;
+            box-shadow: 0 2px 12px rgba(52, 152, 219, 0.4);
+            overflow: visible;
+        }
+
+        .drop-line.active {
+            opacity: 1;
+            transform: scaleX(1) translateY(0);
+            animation: dropLinePulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes dropLinePulse {
+            0%, 100% {
+                background-position: 0% 50%;
+                box-shadow: 0 2px 12px rgba(52, 152, 219, 0.4);
+            }
+            50% {
+                background-position: 100% 50%;
+                box-shadow: 0 4px 20px rgba(52, 152, 219, 0.6);
+            }
+        }
+
+        .drop-line::before {
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: 0;
+            right: 0;
+            height: 12px;
+            background: radial-gradient(ellipse at center, rgba(52, 152, 219, 0.2) 0%, transparent 70%);
+            border-radius: 6px;
+        }
+
+        /* Enhanced drop zone highlighting */
+        .editable-field-wrapper.drag-over {
+            border-color: #3498db !important;
+            border-style: solid !important;
+            border-width: 3px !important;
+            background: rgba(52, 152, 219, 0.1) !important;
+            box-shadow: 0 0 20px rgba(52, 152, 219, 0.3) !important;
+            transform: scale(1.02);
+            transition: all 0.2s ease;
+        }
+
+        /* Ensure editable fields have relative positioning for drag handles */
+        .editable-field {
+            position: relative;
+        }
+
+        .editable-field-wrapper.dragging {
+            transform: rotate(2deg);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+            z-index: 100;
+        }
 
         .field-controls {
             position: absolute;

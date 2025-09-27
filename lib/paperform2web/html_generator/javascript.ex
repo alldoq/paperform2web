@@ -1297,32 +1297,197 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             setupAutoSave();
         }
 
-        function initializeDragAndDrop() {
-            // Make all form fields draggable
-            const formFields = document.querySelectorAll('.editable-field');
-            console.log('🎯 Initializing drag and drop for', formFields.length, 'fields');
+        // Drop indicator management
+        let dropIndicators = [];
+        let currentDropTarget = null;
 
-            formFields.forEach((field, index) => {
-                console.log(\`🔧 Setting up mouse-based drag for field \${index + 1}:\`, field.id);
+        function createDropIndicators() {
+            // Remove existing drop indicators
+            removeDropIndicators();
 
-                // Disable draggable on contenteditable elements to prevent conflicts
-                const editableElements = field.querySelectorAll('[contenteditable]');
-                editableElements.forEach(el => {
-                    el.draggable = false;
-                    el.addEventListener('dragstart', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    });
+            const container = document.querySelector('.document-content') || document.querySelector('main');
+            if (!container) return;
+
+            const wrappers = container.querySelectorAll('.editable-field-wrapper');
+            console.log('🎯 Creating drop zones for', wrappers.length, 'wrappers');
+
+            // Create drop zones between wrappers and at the beginning/end
+            wrappers.forEach((wrapper, index) => {
+                // Drop zone before each wrapper
+                const zoneBefore = document.createElement('div');
+                zoneBefore.className = 'drop-zone';
+                zoneBefore.dataset.dropIndex = index.toString();
+                zoneBefore.dataset.dropPosition = 'before';
+                zoneBefore.innerHTML = \`
+                    <div class="drop-zone-content">
+                        <span class="drop-zone-icon">⬇️</span>
+                        <div class="drop-zone-text">DRAG YOUR ELEMENT HERE</div>
+                        <div class="drop-zone-subtext">Field will be placed before this one</div>
+                    </div>
+                \`;
+                wrapper.parentNode.insertBefore(zoneBefore, wrapper);
+                zoneBefore.style.display = 'none'; // Initially hidden
+                dropIndicators.push(zoneBefore);
+
+                // Drop zone after the last wrapper
+                if (index === wrappers.length - 1) {
+                    const zoneAfter = document.createElement('div');
+                    zoneAfter.className = 'drop-zone';
+                    zoneAfter.dataset.dropIndex = (index + 1).toString();
+                    zoneAfter.dataset.dropPosition = 'after';
+                    zoneAfter.innerHTML = \`
+                        <div class="drop-zone-content">
+                            <span class="drop-zone-icon">⬇️</span>
+                            <div class="drop-zone-text">DRAG YOUR ELEMENT HERE</div>
+                            <div class="drop-zone-subtext">Field will be placed at the end</div>
+                        </div>
+                    \`;
+                    wrapper.parentNode.insertBefore(zoneAfter, wrapper.nextSibling);
+                    zoneAfter.style.display = 'none'; // Initially hidden
+                    dropIndicators.push(zoneAfter);
+                }
+            });
+
+            // If no wrappers exist, create one at the beginning
+            if (wrappers.length === 0 && container) {
+                const zone = document.createElement('div');
+                zone.className = 'drop-zone';
+                zone.dataset.dropIndex = '0';
+                zone.dataset.dropPosition = 'before';
+                zone.innerHTML = \`
+                    <div class="drop-zone-content">
+                        <span class="drop-zone-icon">⬇️</span>
+                        <div class="drop-zone-text">DRAG YOUR ELEMENT HERE</div>
+                        <div class="drop-zone-subtext">Field will be placed at the beginning</div>
+                    </div>
+                \`;
+                container.insertBefore(zone, container.firstChild);
+                zone.style.display = 'none'; // Initially hidden
+                dropIndicators.push(zone);
+            }
+
+            // Use compact drop lines for tight spaces or many fields
+            if (wrappers.length > 8) {
+                // Replace zones with compact lines for better UX with many fields
+                dropIndicators.forEach(indicator => {
+                    if (indicator.classList.contains('drop-zone')) {
+                        indicator.className = 'drop-line';
+                        indicator.innerHTML = '';
+                        indicator.style.display = 'none'; // Keep hidden after transformation
+                    }
                 });
+            }
+        }
 
-                // Remove any existing drag handles first, then add our JavaScript one
-                const existingHandles = field.querySelectorAll('.drag-handle');
-                existingHandles.forEach(handle => handle.remove());
+        function removeDropIndicators() {
+            console.log('🧹 Hiding drop indicators...');
+            console.log('Total indicators to hide:', dropIndicators.length);
+            // Hide all indicators instead of removing them
+            dropIndicators.forEach(indicator => {
+                console.log('Hiding indicator:', indicator.className, indicator.dataset.dropIndex);
+                indicator.classList.remove('active');
+                indicator.style.display = 'none';
+                // Reset any custom transforms
+                if (indicator.classList.contains('drop-zone')) {
+                    indicator.style.transform = '';
+                } else if (indicator.classList.contains('drop-line')) {
+                    indicator.style.transform = '';
+                }
+            });
+            currentDropTarget = null;
+        }
 
-                // Add our JavaScript drag handle
-                const dragHandle = document.createElement('div');
-                dragHandle.className = 'drag-handle';
-                dragHandle.innerHTML = \`
+        function updateDropIndicator(targetIndex, position) {
+            console.log('🔧 updateDropIndicator called with:', { targetIndex, position, totalIndicators: dropIndicators.length });
+
+            // Remove active class from all indicators
+            dropIndicators.forEach(indicator => {
+                indicator.classList.remove('active');
+            });
+
+            // Find and activate the target indicator
+            const targetIndicator = dropIndicators.find(indicator =>
+                parseInt(indicator.dataset.dropIndex) === targetIndex &&
+                indicator.dataset.dropPosition === position
+            );
+
+            console.log('🎯 Found target indicator:', targetIndicator);
+
+            if (targetIndicator) {
+                console.log('✅ Activating indicator:', targetIndicator.className, targetIndicator.dataset);
+                targetIndicator.classList.add('active');
+                currentDropTarget = { index: targetIndex, position: position };
+
+                // Add different styling based on type
+                if (targetIndicator.classList.contains('drop-zone')) {
+                    targetIndicator.style.transform = 'scale(1.05) translateY(0)';
+                } else if (targetIndicator.classList.contains('drop-line')) {
+                    targetIndicator.style.transform = 'scale(1.02) translateY(0)';
+                }
+            } else {
+                console.log('❌ No matching indicator found');
+                currentDropTarget = null;
+            }
+        }
+
+        function initializeDragAndDrop() {
+            // Create drop indicators first
+            createDropIndicators();
+
+            // Debug: Log initial state
+            console.log('🔧 initializeDragAndDrop called');
+            console.log('🔧 Drop indicators created:', dropIndicators.length);
+            console.log('🔧 Drop zones in DOM:', document.querySelectorAll('.drop-zone').length);
+
+
+            // Make all form field wrappers draggable (these contain the full field structure)
+            const formFieldWrappers = document.querySelectorAll('.editable-field-wrapper');
+            console.log('🎯 Initializing drag and drop for', formFieldWrappers.length, 'field wrappers');
+
+            formFieldWrappers.forEach((wrapper, index) => {
+                console.log(\`🔧 Setting up drag functionality for wrapper \${index + 1}:\`, wrapper.id);
+                addDragFunctionality(wrapper);
+            });
+
+            // Also handle any direct editable fields that aren't wrapped
+            const directFields = document.querySelectorAll('.editable-field:not(.editable-field-wrapper .editable-field)');
+            console.log('🎯 Found', directFields.length, 'direct editable fields (not wrapped)');
+            directFields.forEach((field, index) => {
+                console.log(\`🔧 Setting up drag functionality for direct field \${index + 1}:\`, field.id, 'type:', field.dataset.fieldType);
+                addDragFunctionality(field);
+            });
+
+            // Additional debugging for radio buttons specifically
+            const radioFields = document.querySelectorAll('.editable-field[data-field-type="radio"]');
+            console.log('🔘 Found radio fields:', radioFields.length);
+            radioFields.forEach(radio => {
+                console.log('🔘 Radio field details:', radio.id, radio.className, radio.dataset.fieldType);
+            });
+        }
+
+        function addDragFunctionality(field) {
+            if (!field || (!field.classList.contains('editable-field') && !field.classList.contains('editable-field-wrapper'))) return;
+
+            console.log(`🔧 Adding drag functionality to field: ${field.id}`);
+
+            // Disable draggable on contenteditable elements to prevent conflicts
+            const editableElements = field.querySelectorAll('[contenteditable]');
+            editableElements.forEach(el => {
+                el.draggable = false;
+                el.addEventListener('dragstart', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                });
+            });
+
+            // Remove any existing drag handles first
+            const existingHandles = field.querySelectorAll('.drag-handle');
+            existingHandles.forEach(handle => handle.remove());
+
+            // Add our JavaScript drag handle
+            const dragHandle = document.createElement('div');
+            dragHandle.className = 'drag-handle';
+            dragHandle.innerHTML = \`
                     <svg width="12" height="20" viewBox="0 0 12 20" fill="none">
                         <circle cx="3" cy="4" r="1.5" fill="currentColor"/>
                         <circle cx="9" cy="4" r="1.5" fill="currentColor"/>
@@ -1337,7 +1502,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                 dragHandle.style.cssText = \`
                     position: absolute;
                     top: 50%;
-                    left: -25px;
+                    left: 5px;
                     transform: translateY(-50%);
                     cursor: grab;
                     background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
@@ -1361,13 +1526,12 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                 });
 
                 dragHandle.addEventListener('mouseleave', function() {
-                    if (!isDragging) {
+                    if (!field.isDragging) {
                         this.style.opacity = '0.7';
                         this.style.transform = 'translateY(-50%) scale(1)';
                         this.style.boxShadow = '0 3px 12px rgba(52, 152, 219, 0.4)';
                     }
                 });
-                field.style.position = 'relative';
                 field.appendChild(dragHandle);
 
                 // Add field controls (edit and remove buttons)
@@ -1400,6 +1564,25 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                         // Visual feedback
                         field.style.opacity = '0.5';
                         dragHandle.style.cursor = 'grabbing';
+
+                        // Show drop indicators
+                        console.log('📍 Showing drop indicators...');
+                        console.log('Total indicators to show:', dropIndicators.length);
+
+                        // Debug: Check if indicators exist in DOM
+                        const allDropZonesInDOM = document.querySelectorAll('.drop-zone');
+                        console.log('🔍 Drop zones found in DOM:', allDropZonesInDOM.length);
+
+                        dropIndicators.forEach((indicator, index) => {
+                            console.log(\`Showing indicator \${index}:\`, indicator.className, indicator.dataset.dropIndex, indicator.dataset.dropPosition);
+                            console.log('Indicator in DOM?', document.contains(indicator));
+                            indicator.style.display = 'block';
+                            indicator.style.visibility = 'visible';
+                            console.log('Indicator display set to:', indicator.style.display);
+                        });
+
+                        // Add dragging state to body
+                        document.body.classList.add('dragging-active');
 
                         // Create drag preview
                         dragPreview = field.cloneNode(true);
@@ -1485,55 +1668,74 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                         currentHandleMouseMove = function(e) {
                             if (!isDragging) return;
 
+                            console.log('🖱️ Mouse move during drag:', { x: e.clientX, y: e.clientY });
+
                             // Update preview position
                             if (dragPreview) {
                                 dragPreview.style.left = e.clientX + 10 + 'px';
                                 dragPreview.style.top = e.clientY + 10 + 'px';
                             }
 
-                            // Check if we're over a drop target
-                            const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
-                            const targetField = elementBelow?.closest('.editable-field');
+                            // Calculate drop position based on mouse Y coordinate
+                            const container = document.querySelector('.document-content') || document.querySelector('main');
+                            if (!container) return;
 
-                            // Update drop target highlighting
-                            document.querySelectorAll('.editable-field').forEach(f => {
-                                const wrapper = f.closest('.editable-field-wrapper');
-                                const dropZone = f.querySelector('.drop-zone-indicator');
+                            const wrappers = Array.from(container.querySelectorAll('.editable-field-wrapper'));
+                            const mouseY = e.clientY;
 
-                                if (f === targetField && f !== field && wrapper) {
-                                    // Highlight the active drop target
-                                    wrapper.style.borderStyle = 'solid';
-                                    wrapper.style.borderColor = '#2980b9';
-                                    wrapper.style.borderWidth = '3px';
-                                    wrapper.style.background = 'rgba(52, 152, 219, 0.2)';
-                                    wrapper.style.boxShadow = '0 0 20px rgba(52, 152, 219, 0.5)';
+                            // Find the best drop position
+                            let bestIndex = 0;
+                            let bestPosition = 'before';
+                            let minDistance = Infinity;
 
-                                    // Make drop zone more prominent
-                                    if (dropZone) {
-                                        dropZone.style.opacity = '1';
-                                        dropZone.style.transform = 'translate(-50%, -50%) scale(1.1)';
-                                        dropZone.style.boxShadow = '0 6px 20px rgba(52, 152, 219, 0.6)';
-                                    }
-                                } else if (f !== field && wrapper) {
-                                    // Regular drop zone appearance
-                                    wrapper.style.borderStyle = 'dashed';
-                                    wrapper.style.borderColor = '#3498db';
-                                    wrapper.style.borderWidth = '2px';
-                                    wrapper.style.background = 'rgba(52, 152, 219, 0.08)';
-                                    wrapper.style.boxShadow = '';
+                            // Check position relative to each wrapper
+                            wrappers.forEach((wrapper, index) => {
+                                const rect = wrapper.getBoundingClientRect();
+                                const wrapperCenterY = rect.top + rect.height / 2;
+                                const distance = Math.abs(mouseY - wrapperCenterY);
 
-                                    // Regular drop zone appearance
-                                    if (dropZone) {
-                                        dropZone.style.opacity = '0.95';
-                                        dropZone.style.transform = 'translate(-50%, -50%) scale(1)';
-                                        dropZone.style.boxShadow = '0 4px 12px rgba(52, 152, 219, 0.4)';
-                                    }
+                                if (distance < minDistance) {
+                                    minDistance = distance;
+                                    bestIndex = index;
+                                    bestPosition = mouseY < wrapperCenterY ? 'before' : 'after';
                                 }
                             });
+
+                            // If no wrappers, default to position 0
+                            if (wrappers.length === 0) {
+                                bestIndex = 0;
+                                bestPosition = 'before';
+                            }
+
+                            // Update drop indicator
+                            console.log('🎯 Mouse move - updating drop indicator:', { bestIndex, bestPosition, wrappers: wrappers.length });
+                            updateDropIndicator(bestIndex, bestPosition);
+
+                            // Update wrapper highlighting based on drop position
+                            wrappers.forEach((wrapper, index) => {
+                                if (index === bestIndex) {
+                                    if (bestPosition === 'before') {
+                                        // Highlight as drop target before this wrapper
+                                        wrapper.classList.add('drag-over');
+                                    } else {
+                                        // This wrapper will be pushed down, highlight it too
+                                        wrapper.classList.add('drag-over');
+                                    }
+                                } else {
+                                    wrapper.classList.remove('drag-over');
+                                }
+                            });
+
+                            // If dropping at the end, highlight the last wrapper
+                            if (bestPosition === 'after' && wrappers.length > 0) {
+                                const lastWrapper = wrappers[wrappers.length - 1];
+                                lastWrapper.classList.add('drag-over');
+                            }
                         };
 
                         currentHandleMouseUp = function(e) {
                             console.log('🎯 Mouse drag ended for:', field.id);
+                            console.log('📍 Final mouse position:', { x: e.clientX, y: e.clientY });
                             if (!isDragging) return;
 
                             // Clean up event listeners immediately
@@ -1549,6 +1751,12 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                             isDragging = false;
                             field.style.opacity = '';
                             dragHandle.style.cursor = 'grab';
+
+                            // Remove drop indicators and highlighting
+                            removeDropIndicators();
+                            document.querySelectorAll('.editable-field-wrapper').forEach(w => {
+                                w.classList.remove('drag-over');
+                            });
 
                             // Re-enable hover effects
                             document.body.classList.remove('dragging-active');
@@ -1761,27 +1969,327 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                         document.addEventListener('mousemove', currentHandleMouseMove);
                         document.addEventListener('mouseup', currentHandleMouseUp);
                     });
+        }
 
-                // Disable HTML5 drag events since we're using mouse-based dragging
-                field.draggable = false; // Disable native dragging
-                // field.addEventListener('dragstart', handleDragStart);
-                // field.addEventListener('dragover', handleDragOver);
-                // field.addEventListener('drop', handleDrop);
-                // field.addEventListener('dragend', handleDragEnd);
+        function addDragFunctionality(field) {
+            if (!field || (!field.classList.contains('editable-field') && !field.classList.contains('editable-field-wrapper'))) return;
 
-                // Test if events are properly attached
-                field.addEventListener('mousedown', function() {
-                    console.log('🖱️ Mouse down on field:', this.id);
+            console.log(`🔧 Adding drag functionality to field: ${field.id}`);
+
+            // Disable draggable on contenteditable elements to prevent conflicts
+            const editableElements = field.querySelectorAll('[contenteditable]');
+            editableElements.forEach(el => {
+                el.draggable = false;
+                el.addEventListener('dragstart', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
                 });
             });
 
-            // Container drop zone not needed for mouse-based drag and drop
-            // const formContainer = document.querySelector('.container, .form-content, .form-fields');
-            // if (formContainer) {
-            //     console.log('📦 Setting up form container as drop zone:', formContainer.className);
-            //     formContainer.addEventListener('dragover', handleContainerDragOver);
-            //     formContainer.addEventListener('drop', handleContainerDrop);
-            // }
+            // Remove any existing drag handles first
+            const existingHandles = field.querySelectorAll('.drag-handle');
+            existingHandles.forEach(handle => handle.remove());
+
+            // Add our JavaScript drag handle
+            const dragHandle = document.createElement('div');
+            dragHandle.className = 'drag-handle';
+            dragHandle.innerHTML = `
+                <svg width="12" height="20" viewBox="0 0 12 20" fill="none">
+                    <circle cx="3" cy="4" r="1.5" fill="currentColor"/>
+                    <circle cx="9" cy="4" r="1.5" fill="currentColor"/>
+                    <circle cx="3" cy="10" r="1.5" fill="currentColor"/>
+                    <circle cx="9" cy="10" r="1.5" fill="currentColor"/>
+                    <circle cx="3" cy="16" r="1.5" fill="currentColor"/>
+                    <circle cx="9" cy="16" r="1.5" fill="currentColor"/>
+                </svg>
+            `;
+            dragHandle.title = 'Drag to reorder fields';
+            dragHandle.draggable = false;
+            dragHandle.style.cssText = `
+                position: absolute;
+                top: 50%;
+                left: -25px;
+                transform: translateY(-50%);
+                cursor: grab;
+                background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+                color: white;
+                padding: 10px 8px;
+                border-radius: 6px;
+                font-size: 12px;
+                z-index: 10;
+                user-select: none;
+                box-shadow: 0 3px 12px rgba(52, 152, 219, 0.4);
+                border: 2px solid rgba(255,255,255,0.3);
+                transition: all 0.2s ease;
+                opacity: 0.7;
+            `;
+
+            // Add hover effects
+            dragHandle.addEventListener('mouseenter', function() {
+                this.style.opacity = '1';
+                this.style.transform = 'translateY(-50%) scale(1.1)';
+                this.style.boxShadow = '0 5px 20px rgba(52, 152, 219, 0.6)';
+            });
+            dragHandle.addEventListener('mouseleave', function() {
+                if (!field.isDragging) {
+                    this.style.opacity = '0.7';
+                    this.style.transform = 'translateY(-50%) scale(1)';
+                    this.style.boxShadow = '0 3px 12px rgba(52, 152, 219, 0.4)';
+                }
+            });
+
+            field.appendChild(dragHandle);
+
+            // Add field controls if they don't exist
+            let fieldControls = field.querySelector('.field-controls');
+            if (!fieldControls) {
+                fieldControls = document.createElement('div');
+                fieldControls.className = 'field-controls';
+                fieldControls.innerHTML = `
+                    <button type="button" class="field-control-btn remove-field-btn" onclick="removeField(this)" title="Remove field">
+                        ×
+                    </button>
+                `;
+                field.appendChild(fieldControls);
+            }
+
+            // Set up mouse-based drag functionality
+            let isDragging = false;
+            let dragStartY = 0;
+            let currentHandleMouseMove = null;
+            let currentHandleMouseUp = null;
+
+            dragHandle.addEventListener('mousedown', function(e) {
+                console.log('🖱️ Drag handle mousedown for field:', field.id);
+                e.preventDefault();
+                e.stopPropagation();
+                isDragging = true;
+                field.isDragging = true;
+                dragStartY = e.clientY;
+                draggedElement = field;
+
+                // Visual feedback
+                field.style.opacity = '0.8';
+                field.style.transform = 'scale(1.02)';
+                field.style.zIndex = '1000';
+                field.style.boxShadow = '0 8px 25px rgba(0,0,0,0.15)';
+
+                // Show drop indicators
+                console.log('📍 Showing drop indicators...');
+                console.log('Total indicators to show:', dropIndicators.length);
+
+                // Debug: Check if indicators exist in DOM
+                const allDropZonesInDOM = document.querySelectorAll('.drop-zone');
+                console.log('🔍 Drop zones found in DOM:', allDropZonesInDOM.length);
+
+                dropIndicators.forEach((indicator, index) => {
+                    console.log(\`Showing indicator \${index}:\`, indicator.className, indicator.dataset.dropIndex, indicator.dataset.dropPosition);
+                    console.log('Indicator in DOM?', document.contains(indicator));
+                    indicator.style.display = 'block';
+                    indicator.style.visibility = 'visible';
+                    console.log('Indicator display set to:', indicator.style.display);
+                });
+
+                // Add dragging state to body
+                document.body.classList.add('dragging-active');
+
+                // Set up mouse move and up handlers
+                currentHandleMouseMove = function(e) {
+                    if (!isDragging) return;
+
+                    // Update drop indicator based on mouse position
+                    const wrappers = Array.from(document.querySelectorAll('.editable-field-wrapper'));
+                    const mouseY = e.clientY;
+
+                    let bestIndex = 0;
+                    let bestPosition = 'before';
+                    let minDistance = Infinity;
+
+                    wrappers.forEach((wrapper, index) => {
+                        const rect = wrapper.getBoundingClientRect();
+                        const centerY = rect.top + rect.height / 2;
+
+                        // Distance to drop before this wrapper
+                        const distanceBefore = Math.abs(mouseY - rect.top);
+                        if (distanceBefore < minDistance) {
+                            minDistance = distanceBefore;
+                            bestIndex = index;
+                            bestPosition = 'before';
+                        }
+
+                        // Distance to drop after this wrapper (only for last wrapper)
+                        if (index === wrappers.length - 1) {
+                            const distanceAfter = Math.abs(mouseY - rect.bottom);
+                            if (distanceAfter < minDistance) {
+                                minDistance = distanceAfter;
+                                bestIndex = index + 1;
+                                bestPosition = 'after';
+                            }
+                        }
+                    });
+
+                    // Update drop indicator
+                    updateDropIndicator(bestIndex, bestPosition);
+
+                    // Update wrapper highlighting
+                    wrappers.forEach((wrapper, index) => {
+                        if (index === bestIndex && bestPosition === 'before') {
+                            wrapper.classList.add('drag-over');
+                        } else if (index === bestIndex - 1 && bestPosition === 'after') {
+                            wrapper.classList.add('drag-over');
+                        } else {
+                            wrapper.classList.remove('drag-over');
+                        }
+                    });
+                };
+
+                currentHandleMouseUp = function(e) {
+                    console.log('🎯 Mouse drag ended for:', field.id);
+                    if (!isDragging) return;
+
+                    // Clean up event listeners
+                    if (currentHandleMouseMove) {
+                        document.removeEventListener('mousemove', currentHandleMouseMove);
+                        currentHandleMouseMove = null;
+                    }
+                    if (currentHandleMouseUp) {
+                        document.removeEventListener('mouseup', currentHandleMouseUp);
+                        currentHandleMouseUp = null;
+                    }
+
+                    isDragging = false;
+                    field.isDragging = false;
+
+                    // Reset visual state
+                    field.style.opacity = '';
+                    field.style.transform = '';
+                    field.style.zIndex = '';
+                    field.style.boxShadow = '';
+
+                    // Hide drop indicators and remove dragging state
+                    removeDropIndicators();
+                    document.body.classList.remove('dragging-active');
+                    document.querySelectorAll('.editable-field-wrapper').forEach(w => {
+                        w.classList.remove('drag-over');
+                    });
+
+                    // Handle drop logic
+                    handleFieldDrop(field, e);
+
+                    draggedElement = null;
+                };
+
+                document.addEventListener('mousemove', currentHandleMouseMove);
+                document.addEventListener('mouseup', currentHandleMouseUp);
+            });
+        }
+
+        function handleFieldDrop(draggedField, e) {
+            console.log('🎯 Handling field drop for:', draggedField.id);
+            console.log('📍 Drop position:', { x: e.clientX, y: e.clientY });
+            console.log('📊 Current drop target state:', currentDropTarget);
+
+            // Use the drop target calculated during mouse movement
+            if (!currentDropTarget) {
+                console.log('⚠️ No drop target calculated during drag - attempting fallback calculation');
+
+                // Fallback: calculate drop position on the fly
+                const container = document.querySelector('.document-content') || document.querySelector('main');
+                if (!container) {
+                    console.log('❌ No container found for fallback');
+                    return;
+                }
+
+                const wrappers = Array.from(container.querySelectorAll('.editable-field-wrapper'));
+                const mouseY = e.clientY;
+
+                // Find the best drop position
+                let bestIndex = 0;
+                let bestPosition = 'before';
+                let minDistance = Infinity;
+
+                wrappers.forEach((wrapper, index) => {
+                    const rect = wrapper.getBoundingClientRect();
+                    const wrapperCenterY = rect.top + rect.height / 2;
+                    const distance = Math.abs(mouseY - wrapperCenterY);
+
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        bestIndex = index;
+                        bestPosition = mouseY < wrapperCenterY ? 'before' : 'after';
+                    }
+                });
+
+                console.log('🔄 Fallback calculation result:', { bestIndex, bestPosition, total: wrappers.length });
+
+                if (wrappers.length === 0) {
+                    console.log('❌ No wrappers for fallback');
+                    return;
+                }
+
+                currentDropTarget = { index: bestIndex, position: bestPosition };
+            }
+
+            const { index: targetIndex, position: dropPosition } = currentDropTarget;
+            console.log('🎯 Using calculated drop target:', { targetIndex, dropPosition });
+
+            // Get the parent container
+            const container = draggedField.parentNode;
+            const allWrappers = Array.from(container.querySelectorAll('.editable-field-wrapper'));
+            const draggedIndex = allWrappers.indexOf(draggedField);
+
+            console.log('📊 Drop calculation:', {
+                draggedIndex,
+                targetIndex,
+                dropPosition,
+                total: allWrappers.length
+            });
+
+            if (draggedIndex === -1) {
+                console.log('❌ Dragged element not found in container');
+                return;
+            }
+
+            // Calculate the actual insertion index
+            let insertIndex = targetIndex;
+            if (dropPosition === 'after') {
+                insertIndex = targetIndex;
+            }
+
+            // Adjust for the fact that we're moving the dragged element
+            if (draggedIndex < insertIndex) {
+                insertIndex--;
+            }
+
+            // Ensure valid index
+            insertIndex = Math.max(0, Math.min(insertIndex, allWrappers.length - 1));
+
+            console.log('📍 Final insertion index:', insertIndex);
+
+            if (insertIndex === draggedIndex) {
+                console.log('⚠️ Drop position is same as current position');
+                return;
+            }
+
+            // Find the target element for insertion
+            let targetElement = null;
+            if (insertIndex < allWrappers.length) {
+                targetElement = allWrappers[insertIndex];
+            }
+
+            if (targetElement) {
+                console.log('🔄 Inserting before target:', targetElement.id);
+                container.insertBefore(draggedField, targetElement);
+            } else {
+                console.log('🔄 Appending to container end');
+                container.appendChild(draggedField);
+            }
+
+            console.log('✅ Field moved successfully');
+            console.log('🔄 Triggering save after field reorder...');
+            window.isReorderOperation = true; // Mark as reorder operation
+            saveFormData();
+            window.isReorderOperation = false; // Reset flag
         }
 
         function handleDragStart(e) {
@@ -1924,6 +2432,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             const previewBtn = document.getElementById('switch-to-preview');
             const addFieldBtn = document.getElementById('add-field');
             const addFieldContentBtn = document.getElementById('add-field-button');
+            const clearAllBtn = document.getElementById('clear-all-fields');
             const shareBtn = document.getElementById('share-form');
 
             if (saveBtn) {
@@ -1940,6 +2449,10 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
 
             if (addFieldContentBtn) {
                 addFieldContentBtn.addEventListener('click', showAddFieldDialog);
+            }
+
+            if (clearAllBtn) {
+                clearAllBtn.addEventListener('click', clearAllFields);
             }
 
             if (shareBtn) {
@@ -2044,16 +2557,67 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             return;
         }
 
+        function saveFormDataForced() {
+            // Force save the form data to backend, bypassing the drag skip logic
+            console.log('🔄 saveFormDataForced called - FORCING save operation');
+
+            const documentId = '#{document_id}';
+            if (!documentId) {
+                console.log('❌ No document ID available for forced save');
+                return;
+            }
+
+            const formState = collectCurrentFormState();
+            console.log('🔄 Collected form state for forced save:', formState);
+
+            const requestData = {
+                title: document.querySelector('.editable-title')?.textContent || 'Untitled Form',
+                form_data: formState
+            };
+
+            console.log('🔄 Sending forced save request:', requestData);
+
+            fetch(\`/api/documents/\${documentId}\`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestData)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(\`HTTP error! status: \${response.status}\`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('✅ Forced save successful:', data);
+            })
+            .catch(error => {
+                console.error('❌ Forced save failed:', error);
+                showNotification('Failed to save cleared state', 'error');
+            });
+        }
+
         function setupAutoSave() {
             // Auto-save every 30 seconds
             setInterval(saveFormData, 30000);
         }
 
         function collectCurrentFormState() {
-            const formFields = document.querySelectorAll('.editable-field');
+            // Collect form state based on current DOM order - look for wrappers first, then inner fields
+            const formWrappers = document.querySelectorAll('.editable-field-wrapper');
             const state = [];
 
-            console.log('🔍 COLLECTING FORM STATE - Found fields:', formFields.length);
+            console.log('🔍 COLLECTING FORM STATE - Found wrappers:', formWrappers.length);
+            console.log('🔍 Current DOM order:');
+            formWrappers.forEach((wrapper, index) => {
+                console.log(\`  \${index}: \${wrapper.id} (type: \${wrapper.dataset.fieldType})\`);
+            });
+
+            // If no wrappers found, fall back to editable fields (for backward compatibility)
+            const elementsToProcess = formWrappers.length > 0 ? formWrappers : document.querySelectorAll('.editable-field');
+            console.log('🔍 Processing elements:', elementsToProcess.length, 'type:', formWrappers.length > 0 ? 'wrappers' : 'fields');
 
             // Additional debugging to understand DOM state
             console.log('🔍 DOM DEBUG INFO:');
@@ -2061,6 +2625,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             console.log('  - Body exists:', !!document.body);
             console.log('  - All divs:', document.querySelectorAll('div').length);
             console.log('  - Elements with editable-field class:', document.querySelectorAll('.editable-field').length);
+            console.log('  - Elements with editable-field-wrapper class:', document.querySelectorAll('.editable-field-wrapper').length);
             console.log('  - Elements with data-field-type:', document.querySelectorAll('[data-field-type]').length);
             console.log('  - Radio inputs:', document.querySelectorAll('input[type="radio"]').length);
             console.log('  - Form fields container:', document.querySelector('.form-fields, .form-content, .container'));
@@ -2073,19 +2638,27 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                 console.log('  - Its classes:', allEditableElements[0].className);
             }
 
-            formFields.forEach((field, index) => {
-                const fieldType = field.dataset.fieldType || 'text';
-                const fieldName = field.querySelector('input, textarea, select')?.name || \`field_\${index}\`;
+            elementsToProcess.forEach((element, index) => {
+                // For wrappers, get the field type from the inner field or wrapper itself
+                const fieldElement = element.classList.contains('editable-field-wrapper')
+                    ? element.querySelector('.editable-field') || element
+                    : element;
+
+                const fieldType = fieldElement.dataset.fieldType || element.dataset.fieldType || 'text';
+                const fieldName = fieldElement.querySelector('input, textarea, select')?.name || \`field_\${index}\`;
+
                 // Try multiple ways to get the field content, preserving original labels
-                let fieldContent = field.querySelector('.editable-label')?.textContent?.trim() ||
-                                 field.querySelector('label')?.textContent?.trim() ||
-                                 field.querySelector('.form-question')?.textContent?.trim() ||
-                                 field.querySelector('.form-label')?.textContent?.trim();
+                let fieldContent = fieldElement.querySelector('.editable-label')?.textContent?.trim() ||
+                                 fieldElement.querySelector('label')?.textContent?.trim() ||
+                                 fieldElement.querySelector('.form-question')?.textContent?.trim() ||
+                                 fieldElement.querySelector('.form-label')?.textContent?.trim() ||
+                                 element.querySelector('.editable-label')?.textContent?.trim() ||
+                                 element.querySelector('label')?.textContent?.trim();
 
                 // Fallback: try to get from the field's data attribute or input placeholder
                 if (!fieldContent || fieldContent === '') {
-                    fieldContent = field.dataset.originalLabel ||
-                                 field.querySelector('input, textarea')?.placeholder ||
+                    fieldContent = fieldElement.dataset.originalLabel ||
+                                 fieldElement.querySelector('input, textarea')?.placeholder ||
                                  'Untitled Field';
                 }
 
@@ -2093,14 +2666,14 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                 let options = [];
                 if (fieldType === 'select' || fieldType === 'radio') {
                     try {
-                        options = JSON.parse(field.dataset.options || '[]');
+                        options = JSON.parse(fieldElement.dataset.options || '[]');
                     } catch (e) {
                         // Fallback: extract options from HTML
                         if (fieldType === 'select') {
-                            const selectOptions = field.querySelectorAll('select option:not([value=""])');
+                            const selectOptions = fieldElement.querySelectorAll('select option:not([value=""])');
                             options = Array.from(selectOptions).map(opt => opt.textContent.trim());
                         } else if (fieldType === 'radio') {
-                            const radioInputs = field.querySelectorAll('input[type="radio"]');
+                            const radioInputs = fieldElement.querySelectorAll('input[type="radio"]');
                             options = Array.from(radioInputs).map(input => input.value);
                         }
                     }
@@ -2110,11 +2683,11 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                     index: index,
                     type: 'form_input',  // Mark as form input so it gets processed correctly
                     content: fieldContent,
-                    id: field.id,
+                    id: fieldElement.id,
                     metadata: {
                         input_type: fieldType,  // Store the actual field type here
                         field_name: fieldName,
-                        required: field.dataset.required === 'true',
+                        required: fieldElement.dataset.required === 'true',
                         options: options.length > 0 ? options : undefined  // Only include options if they exist
                     }
                 };
@@ -2126,7 +2699,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                         fieldName,
                         fieldContent,
                         options,
-                        dataOptions: field.dataset.options,
+                        dataOptions: fieldElement.dataset.options,
                         fieldData
                     });
                 }
@@ -2696,6 +3269,8 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                 // Re-initialize drag and drop for the new field using mouse-based system
                 const newField = addButton.previousElementSibling;
                 addDragFunctionality(newField);
+                // Recreate drop indicators to include the new field
+                createDropIndicators();
                 // Initialize editing for new editable elements
                 const editableElements = newField.querySelectorAll('[contenteditable="true"]');
                 editableElements.forEach(element => {
@@ -2871,6 +3446,69 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             }
         }
 
+        function clearAllFields() {
+            if (confirm('Are you sure you want to clear all content? This will remove all fields, labels, titles, radio buttons, checkboxes, and text. This action cannot be undone.')) {
+                // Clear all editable fields (form inputs, radio groups, checkboxes, etc.)
+                const allFields = document.querySelectorAll('.editable-field');
+
+                // Clear all field wrappers
+                const allWrappers = document.querySelectorAll('.editable-field-wrapper');
+
+                // Clear all form field containers and elements
+                const allFormFields = document.querySelectorAll('.form-field, .radio-field, .checkbox-field, .radio-fieldset');
+
+                // Clear all other content including titles, labels, and text sections
+                const allContent = document.querySelectorAll('.form-title, .form-section, .form-question, .form-label, .editable-title, [contenteditable="true"]');
+
+                // Clear individual form inputs that might not be wrapped
+                const allInputs = document.querySelectorAll('input, textarea, select, .radio-options, .radio-option');
+
+                console.log(\`🗑️ Clearing \${allFields.length} editable fields, \${allWrappers.length} wrappers, \${allFormFields.length} form fields, \${allContent.length} content elements, and \${allInputs.length} individual inputs\`);
+
+                // Remove all editable fields first (these are the main containers)
+                allFields.forEach(field => {
+                    field.remove();
+                });
+
+                // Remove all field wrappers
+                allWrappers.forEach(wrapper => {
+                    if (wrapper.parentNode) {
+                        wrapper.remove();
+                    }
+                });
+
+                // Remove all form field containers
+                allFormFields.forEach(field => {
+                    // Only remove if it wasn't already removed as part of an editable field
+                    if (field.parentNode) {
+                        field.remove();
+                    }
+                });
+
+                // Remove all other content elements
+                allContent.forEach(element => {
+                    // Only remove if it's not inside a field we already removed and still exists
+                    if (element.parentNode && !element.closest('.editable-field')) {
+                        element.remove();
+                    }
+                });
+
+                // Remove any remaining individual inputs
+                allInputs.forEach(input => {
+                    // Only remove if it's not inside a field we already removed and still exists
+                    if (input.parentNode && !input.closest('.editable-field, .form-field')) {
+                        input.remove();
+                    }
+                });
+
+                // Force save the cleared state to backend (bypass the drag skip logic)
+                saveFormDataForced();
+
+                // Show confirmation
+                showNotification('All content has been cleared', 'success');
+            }
+        }
+
         function openShareDialog() {
             // Reuse the share dialog from standard JavaScript
             if (!window.documentId) {
@@ -3037,16 +3675,117 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                         from { transform: translateX(100%); opacity: 0; }
                         to { transform: translateX(0); opacity: 1; }
                     }
-                    .editable-field {
+
+                    /* Drag and Drop Styles */
+                    .drop-zone {
+                        min-height: 80px;
+                        border: 3px dashed #94a3b8;
+                        border-radius: 12px;
+                        background-color: #f1f5f9;
+                        margin: 12px 0;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        transition: all 0.3s ease;
+                        opacity: 0.9;
                         position: relative;
-                        border: 2px dashed transparent;
-                        padding: 10px;
-                        margin: 5px 0;
-                        transition: all 0.2s;
+                        z-index: 100;
                     }
-                    .editable-field:hover {
+
+                    .drop-zone.active {
                         border-color: #3b82f6;
-                        background-color: #eff6ff;
+                        background-color: #dbeafe;
+                        opacity: 1;
+                        transform: scale(1.05);
+                        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+                    }
+
+                    .drop-zone-content {
+                        text-align: center;
+                        color: #475569;
+                        font-size: 16px;
+                        font-weight: 500;
+                    }
+
+                    .drop-zone.active .drop-zone-content {
+                        color: #3b82f6;
+                        font-weight: 500;
+                    }
+
+                    .drop-zone-icon {
+                        font-size: 18px;
+                        margin-bottom: 4px;
+                        display: block;
+                    }
+
+                    .drop-zone-text {
+                        font-weight: 600;
+                        margin-bottom: 4px;
+                        font-size: 18px;
+                        letter-spacing: 0.5px;
+                    }
+
+                    .drop-zone-subtext {
+                        font-size: 13px;
+                        opacity: 0.7;
+                        font-weight: 400;
+                    }
+
+                    .drop-line {
+                        min-height: 40px;
+                        background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+                        border: 2px dashed #64748b;
+                        border-radius: 8px;
+                        margin: 8px 0;
+                        transition: all 0.3s ease;
+                        opacity: 0.8;
+                        position: relative;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                    }
+
+                    .drop-line:before {
+                        content: "DRAG YOUR ELEMENT HERE";
+                        color: #64748b;
+                        font-size: 14px;
+                        font-weight: 600;
+                        letter-spacing: 0.5px;
+                        text-align: center;
+                    }
+
+                    .drop-line.active {
+                        background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+                        border-color: #3b82f6;
+                        min-height: 50px;
+                        opacity: 1;
+                        transform: scale(1.02);
+                        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+                    }
+
+                    .drop-line.active:before {
+                        color: #3b82f6;
+                        font-size: 16px;
+                    }
+
+                    .drag-over {
+                        border: 2px solid #3b82f6 !important;
+                        background-color: #eff6ff !important;
+                        transform: scale(1.01);
+                        transition: all 0.2s ease;
+                    }
+
+                    .dragging-active {
+                        cursor: grabbing !important;
+                    }
+
+                    .dragging-active * {
+                        cursor: grabbing !important;
+                    }
+
+                    .drop-zone-indicator {
+                        pointer-events: none;
+                        user-select: none;
                     }
                 </style>
             \`;

@@ -74,7 +74,7 @@ defmodule Paperform2web.HtmlGenerator do
         <div class="container">
             #{ContentGeneration.generate_header(data, editing_mode, &ContentGeneration.escape_html/1)}
             #{if editing_mode, do: content_html, else: FormGeneration.generate_form_wrapper(content_html, document_id, options)}
-            #{ContentGeneration.generate_metadata_section(data["metadata"], options)}
+            #{ContentGeneration.generate_metadata_section(data["metadata"], Map.put(options, :show_metadata, false))}
         </div>
         #{Javascript.generate_javascript(editing_mode, document_id)}
         #{if is_pdf_multipage, do: Pagination.generate_pagination_javascript(data["pages"]), else: ""}
@@ -149,27 +149,48 @@ defmodule Paperform2web.HtmlGenerator do
     end
   end
 
-  defp generate_editable_section(section, index) do
-    type = section["type"] || "text"
-    _content = section["content"] || ""
-    formatting = section["formatting"] || %{}
-    _position = section["position"] || %{}
+  defp generate_editable_section(section_or_group, index) do
+    if is_list(section_or_group) do
+      # This is a radio group - handle the first section as the group label
+      [first_section | radio_sections] = section_or_group
+      type = "radio_group"
+      _content = first_section["content"] || "Radio Group"
+      field_name = get_in(List.first(radio_sections), ["metadata", "field_name"]) || "radio_group_#{index}"
+      field_id = "editable_#{field_name}_#{index}"
 
-    _css_classes = build_css_classes(type, formatting)
-    field_name = get_in(section, ["metadata", "field_name"]) || "field_#{index}"
-    field_id = "editable_#{field_name}_#{index}"
-
-    # Generate the editable wrapper with drag and drop functionality
-    """
-    <div class="editable-field-wrapper" data-field-type="#{type}" draggable="true" id="#{field_id}">
-      <div class="drag-handle" title="Drag to reorder"></div>
-      <div class="field-controls">
-        <button class="field-control-btn edit-btn" onclick="editField('#{field_id}')" title="Edit field">✏️</button>
-        <button class="field-control-btn delete-btn" onclick="deleteField('#{field_id}')" title="Delete field">🗑️</button>
+      # Generate the editable wrapper with the radio group content
+      """
+      <div class="editable-field-wrapper" data-field-type="#{type}" draggable="true" id="#{field_id}">
+        <div class="field-controls">
+          <button class="field-control-btn edit-btn" onclick="editField('#{field_id}')" title="Edit field">✏️</button>
+          <button class="field-control-btn delete-btn" onclick="deleteField('#{field_id}')" title="Delete field">🗑️</button>
+        </div>
+        #{generate_form_radio_group(section_or_group, index, true)}
       </div>
-      #{FormGeneration.generate_form_section(section, index, &build_css_classes/2, &build_inline_styles/2, &ContentGeneration.escape_html/1, true)}
-    </div>
-    """
+      """
+    else
+      # This is a single section - handle as before
+      section = section_or_group
+      type = section["type"] || "text"
+      _content = section["content"] || ""
+      formatting = section["formatting"] || %{}
+      _position = section["position"] || %{}
+
+      _css_classes = build_css_classes(type, formatting)
+      field_name = get_in(section, ["metadata", "field_name"]) || "field_#{index}"
+      field_id = "editable_#{field_name}_#{index}"
+
+      # Generate the editable wrapper with drag and drop functionality
+      """
+      <div class="editable-field-wrapper" data-field-type="#{type}" draggable="true" id="#{field_id}">
+        <div class="field-controls">
+          <button class="field-control-btn edit-btn" onclick="editField('#{field_id}')" title="Edit field">✏️</button>
+          <button class="field-control-btn delete-btn" onclick="deleteField('#{field_id}')" title="Delete field">🗑️</button>
+        </div>
+        #{FormGeneration.generate_form_section(section, index, &build_css_classes/2, &build_inline_styles/2, &ContentGeneration.escape_html/1, true)}
+      </div>
+      """
+    end
   end
 
   # Helper functions that are still needed

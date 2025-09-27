@@ -18,7 +18,13 @@ defmodule Paperform2web.HtmlGenerator.ContentGeneration do
       |> Enum.map_join("\n", fn {section_group, index} ->
         if is_list(section_group) do
           # This is a group of radio buttons - render as fieldset
-          if form_generator, do: form_generator.(:radio_fieldset, section_group, index), else: ""
+          if editing_mode && editable_generator do
+            # In editing mode, wrap radio groups with editable wrapper for dragging
+            editable_generator.(section_group, index)
+          else
+            # In preview mode, use regular form generation
+            if form_generator, do: form_generator.(:radio_fieldset, section_group, index), else: ""
+          end
         else
           # This is a single section
           if editable_generator, do: editable_generator.(section_group, index), else: ""
