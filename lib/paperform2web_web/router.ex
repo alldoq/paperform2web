@@ -13,6 +13,7 @@ defmodule Paperform2webWeb.Router do
       get "/html", DocumentController, :html_output
       patch "/theme", DocumentController, :update_theme
       patch "/form_structure", DocumentController, :update_form_structure
+      post "/reorder-fields", DocumentController, :reorder_fields
       patch "/title", DocumentController, :update_title
       post "/share", DocumentController, :create_share
       get "/shares", DocumentController, :list_shares

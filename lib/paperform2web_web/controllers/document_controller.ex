@@ -105,6 +105,20 @@ defmodule Paperform2webWeb.DocumentController do
     end
   end
 
+  def reorder_fields(conn, %{"document_id" => id, "field_order" => field_order}) do
+    document = Documents.get_document!(id)
+
+    case Documents.reorder_fields(document, field_order) do
+      {:ok, _updated_document} ->
+        conn
+        |> json(%{success: true, message: "Fields reordered successfully"})
+      {:error, reason} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{error: reason})
+    end
+  end
+
   def update_title(conn, %{"document_id" => id, "title" => title}) do
     document = Documents.get_document!(id)
 
@@ -126,15 +140,35 @@ defmodule Paperform2webWeb.DocumentController do
     cond do
       # If both title and form_data are provided (from editing mode)
       Map.has_key?(params, "title") and Map.has_key?(params, "form_data") ->
-        with {:ok, updated_document} <- Documents.update_document_title(document, params["title"]),
-             {:ok, final_document} <- Documents.update_form_structure(updated_document, params["form_data"]) do
-          conn
-          |> render(:show, document: final_document)
-        else
-          {:error, changeset} ->
+        # Check if this is a reorder operation
+        if Map.get(params, "is_reorder", false) do
+          # For reorder operations, use the reorder function
+          field_order = Enum.with_index(params["form_data"], fn field, index ->
+            %{"id" => field["id"], "index" => index}
+          end)
+
+          with {:ok, updated_document} <- Documents.update_document_title(document, params["title"]),
+               {:ok, final_document} <- Documents.reorder_fields(updated_document, field_order) do
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{errors: changeset})
+            |> render(:show, document: final_document)
+          else
+            {:error, changeset} ->
+              conn
+              |> put_status(:unprocessable_entity)
+              |> json(%{errors: changeset})
+          end
+        else
+          # Regular form structure update
+          with {:ok, updated_document} <- Documents.update_document_title(document, params["title"]),
+               {:ok, final_document} <- Documents.update_form_structure(updated_document, params["form_data"]) do
+            conn
+            |> render(:show, document: final_document)
+          else
+            {:error, changeset} ->
+              conn
+              |> put_status(:unprocessable_entity)
+              |> json(%{errors: changeset})
+          end
         end
 
       # If only title is provided
@@ -151,14 +185,32 @@ defmodule Paperform2webWeb.DocumentController do
 
       # If only form_data is provided
       Map.has_key?(params, "form_data") ->
-        case Documents.update_form_structure(document, params["form_data"]) do
-          {:ok, updated_document} ->
-            conn
-            |> render(:show, document: updated_document)
-          {:error, changeset} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{errors: changeset})
+        if Map.get(params, "is_reorder", false) do
+          # For reorder operations, use the reorder function
+          field_order = Enum.with_index(params["form_data"], fn field, index ->
+            %{"id" => field["id"], "index" => index}
+          end)
+
+          case Documents.reorder_fields(document, field_order) do
+            {:ok, updated_document} ->
+              conn
+              |> render(:show, document: updated_document)
+            {:error, changeset} ->
+              conn
+              |> put_status(:unprocessable_entity)
+              |> json(%{errors: changeset})
+          end
+        else
+          # Regular form structure update
+          case Documents.update_form_structure(document, params["form_data"]) do
+            {:ok, updated_document} ->
+              conn
+              |> render(:show, document: updated_document)
+            {:error, changeset} ->
+              conn
+              |> put_status(:unprocessable_entity)
+              |> json(%{errors: changeset})
+          end
         end
 
       # If neither title nor form_data is provided, return error
@@ -376,7 +428,7 @@ defmodule Paperform2webWeb.DocumentController do
 
     # Log the test submission for development purposes
     require Logger
-    Logger.info("📝 Test form submission for document #{id}")
+    Logger.info("Test form submission for document #{id}")
     Logger.info("Form data: #{inspect(form_data, pretty: true)}")
 
     # Create a mock submission record for testing

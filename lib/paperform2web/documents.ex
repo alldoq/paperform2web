@@ -270,6 +270,80 @@ defmodule Paperform2web.Documents do
     update_document(document, %{processed_data: final_processed_data})
   end
 
+  @doc """
+  Reorders fields in a document without creating new fields.
+  Only updates the order/index of existing form fields.
+  """
+  def reorder_fields(%Document{} = document, field_order) do
+    IO.puts("=== REORDER_FIELDS DEBUG ===")
+    IO.puts("Field order received: #{inspect(field_order)}")
+
+    # Get existing sections
+    existing_sections = get_in(document.processed_data, ["content", "sections"]) || []
+    IO.puts("Existing sections count: #{length(existing_sections)}")
+
+    # Separate form fields from other content sections
+    {form_sections, other_sections} = Enum.split_with(existing_sections, fn section ->
+      Map.has_key?(section, "form_field_id")
+    end)
+
+    IO.puts("Form sections count: #{length(form_sections)}")
+    IO.puts("Other sections count: #{length(other_sections)}")
+
+    # Create a map of form sections by their ID for quick lookup
+    form_sections_map = Enum.reduce(form_sections, %{}, fn section, acc ->
+      field_id = section["form_field_id"]
+      Map.put(acc, field_id, section)
+    end)
+
+    # Reorder form sections according to the provided field_order
+    reordered_form_sections = Enum.map(field_order, fn %{"id" => field_id, "index" => new_index} ->
+      case Map.get(form_sections_map, field_id) do
+        nil ->
+          IO.puts("Warning: Field ID #{field_id} not found in existing sections")
+          nil
+        section ->
+          # Update the position y coordinate based on new index
+          updated_position = Map.put(section["position"] || %{}, "y", new_index * 50)
+          Map.put(section, "position", updated_position)
+      end
+    end)
+    |> Enum.filter(& &1 != nil)  # Remove any nil entries
+
+    IO.puts("Reordered form sections count: #{length(reordered_form_sections)}")
+
+    # Combine other sections with reordered form sections
+    combined_sections = other_sections ++ reordered_form_sections
+
+    # Update the document structure
+    updated_processed_data =
+      document.processed_data
+      |> put_in(["content", "sections"], combined_sections)
+
+    # Also update pages if they exist (for multi-page documents)
+    final_processed_data = if Map.has_key?(updated_processed_data, "pages") do
+      pages = updated_processed_data["pages"] || []
+      updated_first_page = if length(pages) > 0 do
+        first_page = Enum.at(pages, 0)
+        Map.put(first_page, "content", %{"sections" => combined_sections})
+      end
+
+      updated_pages = if updated_first_page do
+        [updated_first_page | Enum.drop(pages, 1)]
+      else
+        pages
+      end
+
+      Map.put(updated_processed_data, "pages", updated_pages)
+    else
+      updated_processed_data
+    end
+
+    IO.puts("=== END REORDER DEBUG ===")
+
+    update_document(document, %{processed_data: final_processed_data})
+  end
+
   defp determine_section_type(field_type) do
     case field_type do
       "checkbox" -> "checkbox"

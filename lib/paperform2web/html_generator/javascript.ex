@@ -1981,17 +1981,25 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                     const formState = collectCurrentFormState();
                     const title = document.querySelector('.editable-title')?.textContent || 'Untitled Form';
 
+                    // Check if this is a reorder operation
+                    const requestBody = {
+                        title: title,
+                        form_data: formState,
+                        last_modified: new Date().toISOString()
+                    };
+
+                    if (window.isReorderOperation) {
+                        requestBody.is_reorder = true;
+                        console.log('🔄 Marking request as REORDER operation');
+                    }
+
                     // Save to server
                     fetch(\`/api/documents/\${documentId}\`, {
                         method: 'PUT',
                         headers: {
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify({
-                            title: title,
-                            form_data: formState,
-                            last_modified: new Date().toISOString()
-                        })
+                        body: JSON.stringify(requestBody)
                     })
                     .then(response => response.json())
                     .then(data => {
@@ -2009,8 +2017,19 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
         }
 
         function saveFormStructure() {
-            // Save the current structure after drag and drop
+            // Mark this as a reorder operation to prevent creating new fields
+            console.log('🔄 saveFormStructure called - this is a REORDER operation, not adding new fields');
+
+            // Set a flag so saveFormData knows this is a reorder
+            window.isReorderOperation = true;
+
+            // Call regular save but with the reorder flag set
             saveFormData();
+
+            // Clear the flag after a short delay
+            setTimeout(() => {
+                window.isReorderOperation = false;
+            }, 1000);
         }
 
         function setupAutoSave() {
@@ -2045,9 +2064,18 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             formFields.forEach((field, index) => {
                 const fieldType = field.dataset.fieldType || 'text';
                 const fieldName = field.querySelector('input, textarea, select')?.name || \`field_\${index}\`;
-                const fieldContent = field.querySelector('.editable-label')?.textContent ||
-                                   field.querySelector('label')?.textContent ||
-                                   'Untitled Field';
+                // Try multiple ways to get the field content, preserving original labels
+                let fieldContent = field.querySelector('.editable-label')?.textContent?.trim() ||
+                                 field.querySelector('label')?.textContent?.trim() ||
+                                 field.querySelector('.form-question')?.textContent?.trim() ||
+                                 field.querySelector('.form-label')?.textContent?.trim();
+
+                // Fallback: try to get from the field's data attribute or input placeholder
+                if (!fieldContent || fieldContent === '') {
+                    fieldContent = field.dataset.originalLabel ||
+                                 field.querySelector('input, textarea')?.placeholder ||
+                                 'Untitled Field';
+                }
 
                 // Collect options for select and radio fields
                 let options = [];
@@ -2528,7 +2556,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             switch (fieldType) {
                 case 'text':
                     fieldHtml = \`
-                        <div class="editable-field" data-field-type="text" draggable="true" id="editable_${fieldId}">
+                        <div class="editable-field" data-field-type="text" data-original-label="New Text Field" draggable="true" id="editable_${fieldId}">
                             <div class="form-field">
                                 <label for="${fieldId}" class="form-label editable-label" contenteditable="true">New Text Field</label>
                                 <input type="text" id="${fieldId}" name="${fieldName}" class="editable-input" placeholder="Enter text...">
@@ -2643,12 +2671,9 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             if (addButton && addButton.parentNode) {
                 addButton.parentNode.insertBefore(createElementFromHTML(fieldHtml), addButton);
 
-                // Re-initialize drag and drop for the new field
+                // Re-initialize drag and drop for the new field using mouse-based system
                 const newField = addButton.previousElementSibling;
-                newField.addEventListener('dragstart', handleDragStart);
-                newField.addEventListener('dragover', handleDragOver);
-                newField.addEventListener('drop', handleDrop);
-                newField.addEventListener('dragend', handleDragEnd);
+                addDragFunctionality(newField);
 
                 // Initialize editing for new editable elements
                 const editableElements = newField.querySelectorAll('[contenteditable="true"]');
@@ -2667,12 +2692,9 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             const addButton = document.getElementById('add-field-button');
             if (addButton && addButton.parentNode) {
                 addButton.parentNode.insertBefore(createElementFromHTML(fieldHtml), addButton);
-                // Re-initialize drag and drop for the new field
+                // Re-initialize drag and drop for the new field using mouse-based system
                 const newField = addButton.previousElementSibling;
-                newField.addEventListener('dragstart', handleDragStart);
-                newField.addEventListener('dragover', handleDragOver);
-                newField.addEventListener('drop', handleDrop);
-                newField.addEventListener('dragend', handleDragEnd);
+                addDragFunctionality(newField);
                 // Initialize editing for new editable elements
                 const editableElements = newField.querySelectorAll('[contenteditable="true"]');
                 editableElements.forEach(element => {
