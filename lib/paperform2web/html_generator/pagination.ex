@@ -30,11 +30,6 @@ defmodule Paperform2web.HtmlGenerator.Pagination do
     """
     <main class="document-content pdf-paginated-content">
         #{pages_html}
-        <div class="pagination-controls">
-          <button id="prev-page" class="page-btn" onclick="previousPage()" disabled>← Previous</button>
-          <span id="page-info" class="page-info">Page 1 of #{total_pages}</span>
-          <button id="next-page" class="page-btn" onclick="nextPage()">Next →</button>
-        </div>
     </main>
     """
   end

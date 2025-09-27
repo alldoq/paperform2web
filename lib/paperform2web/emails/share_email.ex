@@ -39,7 +39,7 @@ defmodule Paperform2web.Emails.ShareEmail do
     <body>
         <div class="container">
             <div class="header">
-                <h1>📋 Form Invitation</h1>
+                <h1>Form invitation</h1>
                 <p>You've been invited to fill out a form</p>
             </div>
 

@@ -55,7 +55,7 @@ defmodule Paperform2webWeb.Endpoint do
 
   # CORS configuration
   plug CORSPlug,
-    origin: ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
+    origin: ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173", "http://localhost:3001"],
     credentials: false,
     max_age: 86400,
     headers: ["Content-Type", "Authorization", "X-Requested-With"]

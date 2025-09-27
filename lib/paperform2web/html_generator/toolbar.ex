@@ -42,11 +42,32 @@ defmodule Paperform2web.HtmlGenerator.Toolbar do
         <div class="toolbar-content">
             <h3>Form Editor</h3>
             <div class="toolbar-actions">
-                <button id="switch-to-preview" class="btn btn-secondary">Switch to Preview</button>
-                <button id="save-form" class="btn btn-primary">Save Changes</button>
-                <button id="reset-form" class="btn btn-secondary">Reset</button>
-                <button id="add-field" class="btn btn-secondary">Add Field</button>
-                <button id="clear-all-fields" class="btn btn-danger">Clear All Fields</button>
+                <!-- Page Management Section -->
+                <div class="page-management">
+                    <div class="page-info">
+                        <span id="page-counter">Page 1 of 1</span>
+                    </div>
+                    <div class="page-controls">
+                        <button id="edit-prev-page" class="btn btn-secondary btn-small" disabled>‹</button>
+                        <button id="edit-next-page" class="btn btn-secondary btn-small" disabled>›</button>
+                        <button id="edit-add-page" class="btn btn-success btn-small">+ Page</button>
+                        <button id="edit-delete-page" class="btn btn-danger btn-small" disabled>🗑</button>
+                    </div>
+                </div>
+
+                <!-- Field Management Section -->
+                <div class="field-management">
+                    <button id="add-field" class="btn btn-secondary">Add Field</button>
+                    <button id="clear-all-fields" class="btn btn-danger">Clear All Fields</button>
+                </div>
+
+                <!-- Form Actions Section -->
+                <div class="form-actions-toolbar">
+                    <button id="switch-to-preview" class="btn btn-secondary">Preview</button>
+                    <button id="save-form" class="btn btn-primary">Save Changes</button>
+                    <button id="reset-form" class="btn btn-secondary">Reset</button>
+                </div>
+
                 #{generate_style_selector()}
             </div>
         </div>
@@ -112,6 +133,41 @@ defmodule Paperform2web.HtmlGenerator.Toolbar do
 
         .toolbar-actions {
             display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        /* Page Management Styles */
+        .page-management {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+        }
+
+        .page-info {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #475569;
+            min-width: 80px;
+        }
+
+        .page-controls {
+            display: flex;
+            gap: 0.25rem;
+        }
+
+        .field-management {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .form-actions-toolbar {
+            display: flex;
             gap: 0.5rem;
         }
 
@@ -156,6 +212,22 @@ defmodule Paperform2web.HtmlGenerator.Toolbar do
         .btn-danger:hover {
             background: #b91c1c;
             border-color: #b91c1c;
+        }
+
+        .btn-success {
+            background: #16a34a;
+            color: white;
+            border-color: #16a34a;
+        }
+        .btn-success:hover {
+            background: #15803d;
+            border-color: #15803d;
+        }
+
+        .btn-small {
+            padding: 0.4rem 0.8rem;
+            font-size: 0.75rem;
+            font-weight: 500;
         }
 
         /* Style Selector */
@@ -650,6 +722,23 @@ defmodule Paperform2web.HtmlGenerator.Toolbar do
         .add-field-text {
             font-weight: 600;
             letter-spacing: 0.5px;
+        }
+
+        /* Page Management Styles */
+        .page-hidden {
+            display: none !important;
+            visibility: hidden !important;
+            opacity: 0 !important;
+            height: 0 !important;
+            overflow: hidden !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+
+        .page-visible {
+            display: block !important;
+            visibility: visible !important;
+            opacity: 1 !important;
         }
     </style>
     """

@@ -53,6 +53,7 @@ defmodule Paperform2web.HtmlGenerator do
     is_pdf_multipage = data["document_type"] == "pdf_multipage" and data["pages"]
 
     content_html = if is_pdf_multipage do
+      # For PDF multipage, use the PDF pagination structure
       Pagination.generate_pdf_paginated_content(data, editing_mode, &generate_content_with_modules/2)
     else
       generate_content_with_modules(data["content"], editing_mode)
@@ -77,7 +78,6 @@ defmodule Paperform2web.HtmlGenerator do
             #{ContentGeneration.generate_metadata_section(data["metadata"], Map.put(options, :show_metadata, false))}
         </div>
         #{Javascript.generate_javascript(editing_mode, document_id)}
-        #{if is_pdf_multipage, do: Pagination.generate_pagination_javascript(data["pages"]), else: ""}
     </body>
     </html>
     """

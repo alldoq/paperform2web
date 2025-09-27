@@ -2568,6 +2568,28 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             if (shareBtn) {
                 shareBtn.addEventListener('click', openShareDialog);
             }
+
+            // Page management buttons (edit mode)
+            const addPageBtn = document.getElementById('edit-add-page');
+            const deletePageBtn = document.getElementById('edit-delete-page');
+            const prevPageBtn = document.getElementById('edit-prev-page');
+            const nextPageBtn = document.getElementById('edit-next-page');
+
+            if (addPageBtn) {
+                addPageBtn.addEventListener('click', addNewPage);
+            }
+            if (deletePageBtn) {
+                deletePageBtn.addEventListener('click', deleteCurrentPage);
+            }
+            if (prevPageBtn) {
+                prevPageBtn.addEventListener('click', goToPreviousPage);
+            }
+            if (nextPageBtn) {
+                nextPageBtn.addEventListener('click', goToNextPage);
+            }
+
+            // Initialize page management
+            initializePageManagement();
         }
 
         function initializeThemeSelector() {
@@ -4468,6 +4490,211 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             \`;
             document.head.insertAdjacentHTML('beforeend', styles);
         }
+
+        // Page Management Functions
+        let currentPageIndex = 0;
+        let pages = [{ fields: [] }]; // Initialize with one empty page
+
+        function initializePageManagement() {
+            // Load existing pages or create first page
+            loadPagesFromForm();
+            updatePageControls();
+
+            // Simple field assignment check every few seconds
+            setInterval(() => {
+                assignNewFieldsToCurrentPage();
+            }, 3000);
+        }
+
+        function loadPagesFromForm() {
+            // Try to detect existing pages from the form structure
+            const formContainer = document.querySelector('.container') || document.querySelector('main');
+            if (!formContainer) return;
+
+            // Check if this is a PDF multipage document
+            const pdfPages = document.querySelectorAll('.pdf-page');
+            const existingFields = formContainer.querySelectorAll('.editable-field-wrapper');
+
+            if (pdfPages.length > 0) {
+                // PDF multipage document - use existing PDF pages structure
+                pages = [];
+                pdfPages.forEach((pdfPage, index) => {
+                    const pageFields = pdfPage.querySelectorAll('.editable-field-wrapper');
+                    pageFields.forEach(field => {
+                        field.setAttribute('data-page', index.toString());
+                    });
+                    pages.push({ fields: Array.from(pageFields) });
+                });
+                console.log(`📄 Loaded ${pages.length} PDF page(s)`);
+
+                // For PDF pages, start on page 1 and show it
+                currentPageIndex = 0;
+                showPage(0);
+            } else {
+                // Single page or new form - initialize with one page
+                pages = [{ fields: [] }];
+                existingFields.forEach(field => {
+                    field.setAttribute('data-page', '0');
+                    pages[0].fields.push(field);
+                });
+                console.log(`📄 Initialized with 1 page, ${pages[0].fields.length} fields`);
+            }
+        }
+
+        function addNewPage() {
+            pages.push({ fields: [] });
+            // Don't automatically switch to the new page - just update controls
+            updatePageControls();
+            showNotification(`Page ${pages.length} added successfully! Use navigation to switch to it.`, 'success');
+            console.log(`📄 Added new page. Total pages: ${pages.length}. Current page: ${currentPageIndex + 1}`);
+        }
+
+        function deleteCurrentPage() {
+            if (pages.length <= 1) {
+                showNotification('Cannot delete the last page!', 'error');
+                return;
+            }
+
+            const confirmed = confirm(`Are you sure you want to delete Page ${currentPageIndex + 1}? This will remove all fields on this page.`);
+            if (!confirmed) return;
+
+            // Remove fields from the page
+            const pageFields = pages[currentPageIndex].fields || [];
+            pageFields.forEach(field => {
+                if (field && field.remove) {
+                    field.remove();
+                }
+            });
+
+            pages.splice(currentPageIndex, 1);
+
+            // Adjust current page index
+            if (currentPageIndex >= pages.length) {
+                currentPageIndex = pages.length - 1;
+            }
+
+            updatePageControls();
+            showPage(currentPageIndex);
+            showNotification(`Page deleted successfully!`, 'success');
+            console.log(`📄 Deleted page. Total pages: ${pages.length}`);
+        }
+
+        function goToPreviousPage() {
+            if (currentPageIndex > 0) {
+                console.log(`🔧 Going to previous page: ${currentPageIndex} -> ${currentPageIndex - 1}`);
+                currentPageIndex--;
+                updatePageControls();
+                showPage(currentPageIndex);
+
+                // Force refresh field assignments
+                setTimeout(assignNewFieldsToCurrentPage, 100);
+            } else {
+                console.log('🔧 Already on first page, cannot go previous');
+            }
+        }
+
+        function goToNextPage() {
+            if (currentPageIndex < pages.length - 1) {
+                console.log(`🔧 Going to next page: ${currentPageIndex} -> ${currentPageIndex + 1}`);
+                currentPageIndex++;
+                updatePageControls();
+                showPage(currentPageIndex);
+
+                // Force refresh field assignments
+                setTimeout(assignNewFieldsToCurrentPage, 100);
+            } else {
+                console.log('🔧 Already on last page, cannot go next');
+            }
+        }
+
+        function showPage(pageIndex) {
+            console.log(`📄 Switching to page ${pageIndex + 1}`);
+
+            // Check if we have PDF pages or regular form fields
+            const pdfPages = document.querySelectorAll('.pdf-page');
+
+            if (pdfPages.length > 0) {
+                // Handle PDF multipage - hide/show entire PDF pages
+                pdfPages.forEach((page, index) => {
+                    if (index === pageIndex) {
+                        page.style.display = 'block';
+                    } else {
+                        page.style.display = 'none';
+                    }
+                });
+                console.log(`📄 PDF mode: showing page ${pageIndex + 1} of ${pdfPages.length}`);
+            } else {
+                // Handle regular form fields with data-page attributes
+                const allFields = document.querySelectorAll('.editable-field-wrapper');
+                allFields.forEach(field => {
+                    field.style.display = 'none';
+                });
+
+                const currentPageFields = document.querySelectorAll(`[data-page="${pageIndex}"]`);
+                currentPageFields.forEach(field => {
+                    field.style.display = 'block';
+                });
+
+                console.log(`📄 Form mode: hiding ${allFields.length} fields, showing ${currentPageFields.length} fields`);
+            }
+        }
+
+        function updatePageControls() {
+            const pageCounter = document.getElementById('page-counter');
+            const prevBtn = document.getElementById('edit-prev-page');
+            const nextBtn = document.getElementById('edit-next-page');
+            const deleteBtn = document.getElementById('edit-delete-page');
+            const addBtn = document.getElementById('edit-add-page');
+
+            if (pageCounter) {
+                pageCounter.textContent = `Page ${currentPageIndex + 1} of ${pages.length}`;
+            }
+
+            if (prevBtn) {
+                prevBtn.disabled = currentPageIndex <= 0;
+            }
+
+            if (nextBtn) {
+                nextBtn.disabled = currentPageIndex >= pages.length - 1;
+            }
+
+            // Check if this is a PDF document (has .pdf-page elements)
+            const isPdfDocument = document.querySelectorAll('.pdf-page').length > 0;
+
+            if (deleteBtn) {
+                // Disable delete for PDF documents or if only one page
+                deleteBtn.disabled = isPdfDocument || pages.length <= 1;
+            }
+
+            if (addBtn) {
+                // Disable add page for PDF documents
+                addBtn.disabled = isPdfDocument;
+                if (isPdfDocument) {
+                    addBtn.title = "Cannot add pages to PDF documents";
+                } else {
+                    addBtn.title = "Add a new page";
+                }
+            }
+        }
+
+        // Monitor for new fields being added and assign them to current page
+        function assignNewFieldsToCurrentPage() {
+            // Find any fields that don't have a page assignment
+            const newFields = document.querySelectorAll('.editable-field-wrapper:not([data-page])');
+
+            if (newFields.length > 0) {
+                console.log(`📄 Found ${newFields.length} new fields, assigning to page ${currentPageIndex + 1}`);
+
+                newFields.forEach(field => {
+                    // Assign to current page
+                    field.setAttribute('data-page', currentPageIndex.toString());
+                    console.log(`📄 Assigned field to page ${currentPageIndex + 1}`);
+                });
+            }
+        }
+
+        // Simple approach: just check for new fields regularly
+        console.log('📄 Page management initialized - fields will be auto-assigned to current page');
 
     </script>
     """
