@@ -233,12 +233,24 @@ defmodule Paperform2web.HtmlGenerator.FormGeneration do
         end
 
       "textarea" ->
-        """
-        <div class="form-field #{css_classes}" style="#{inline_styles}">
-            <label for="#{field_name}">#{html_escaper.(content)}</label>
-            <textarea id="#{field_name}" name="#{field_name}" placeholder="#{html_escaper.(placeholder)}" rows="4"#{required_attr}>#{html_escaper.(field_value)}</textarea>
-        </div>
-        """
+        if editing_mode and form_field_id do
+          """
+          <div class="editable-field" data-field-type="textarea" draggable="true" id="editable_#{form_field_id}">
+              <div class="form-field">
+                  <label for="#{field_name}" class="form-label editable-label" contenteditable="true">#{html_escaper.(content)}</label>
+                  <textarea id="#{field_name}" name="#{field_name}" class="editable-textarea" placeholder="#{html_escaper.(placeholder)}" rows="4">#{html_escaper.(field_value)}</textarea>
+                  <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
+              </div>
+          </div>
+          """
+        else
+          """
+          <div class="form-field #{css_classes}" style="#{inline_styles}">
+              <label for="#{field_name}">#{html_escaper.(content)}</label>
+              <textarea id="#{field_name}" name="#{field_name}" placeholder="#{html_escaper.(placeholder)}" rows="4"#{required_attr}>#{html_escaper.(field_value)}</textarea>
+          </div>
+          """
+        end
 
       "select" ->
         options_html = if Enum.empty?(options) do
@@ -274,12 +286,24 @@ defmodule Paperform2web.HtmlGenerator.FormGeneration do
         end
 
       input_type when input_type in ["date", "time", "datetime-local", "email", "tel", "url", "number", "password"] ->
-        """
-        <div class="form-field #{css_classes}" style="#{inline_styles}">
-            <label for="#{field_name}">#{html_escaper.(content)}</label>
-            <input type="#{input_type}" id="#{field_name}" name="#{field_name}" value="#{html_escaper.(field_value)}" placeholder="#{html_escaper.(placeholder)}"#{required_attr}>
-        </div>
-        """
+        if editing_mode and form_field_id do
+          """
+          <div class="editable-field" data-field-type="#{input_type}" draggable="true" id="editable_#{form_field_id}">
+              <div class="form-field">
+                  <label for="#{field_name}" class="form-label editable-label" contenteditable="true">#{html_escaper.(content)}</label>
+                  <input type="#{input_type}" id="#{field_name}" name="#{field_name}" class="editable-input" value="#{html_escaper.(field_value)}" placeholder="#{html_escaper.(placeholder)}">
+                  <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
+              </div>
+          </div>
+          """
+        else
+          """
+          <div class="form-field #{css_classes}" style="#{inline_styles}">
+              <label for="#{field_name}">#{html_escaper.(content)}</label>
+              <input type="#{input_type}" id="#{field_name}" name="#{field_name}" value="#{html_escaper.(field_value)}" placeholder="#{html_escaper.(placeholder)}"#{required_attr}>
+          </div>
+          """
+        end
 
       "text" ->
         if editing_mode and form_field_id do
