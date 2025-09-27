@@ -152,7 +152,6 @@ defmodule Paperform2web.HtmlGenerator.FormGeneration do
               <div class="form-field checkbox-field #{css_classes}" style="#{inline_styles}">
                   <input type="checkbox" id="#{checkbox_id}" name="#{field_name}" value="#{html_escaper.(value)}"#{checked}#{required_attr}>
                   <label for="#{checkbox_id}" class="editable-label" contenteditable="true">#{html_escaper.(content)}</label>
-                  <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
               </div>
           </div>
           """
@@ -199,8 +198,7 @@ defmodule Paperform2web.HtmlGenerator.FormGeneration do
                 <div class="radio-options">
                   #{radio_buttons}
                 </div>
-                <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⚙️</button>
-                <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
+                <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
               </div>
             </div>
             """
@@ -239,7 +237,6 @@ defmodule Paperform2web.HtmlGenerator.FormGeneration do
               <div class="form-field">
                   <label for="#{field_name}" class="form-label editable-label" contenteditable="true">#{html_escaper.(content)}</label>
                   <textarea id="#{field_name}" name="#{field_name}" class="editable-textarea" placeholder="#{html_escaper.(placeholder)}" rows="4">#{html_escaper.(field_value)}</textarea>
-                  <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
               </div>
           </div>
           """
@@ -271,8 +268,7 @@ defmodule Paperform2web.HtmlGenerator.FormGeneration do
                       <option value="">Choose an option</option>
                       #{options_html}
                   </select>
-                  <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⚙️</button>
-                  <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
+                  <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
               </div>
           </div>
           """
@@ -292,7 +288,6 @@ defmodule Paperform2web.HtmlGenerator.FormGeneration do
               <div class="form-field">
                   <label for="#{field_name}" class="form-label editable-label" contenteditable="true">#{html_escaper.(content)}</label>
                   <input type="#{input_type}" id="#{field_name}" name="#{field_name}" class="editable-input" value="#{html_escaper.(field_value)}" placeholder="#{html_escaper.(placeholder)}">
-                  <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
               </div>
           </div>
           """
@@ -312,7 +307,6 @@ defmodule Paperform2web.HtmlGenerator.FormGeneration do
               <div class="form-field">
                   <label for="#{field_name}" class="form-label editable-label" contenteditable="true">#{html_escaper.(content)}</label>
                   <input type="text" id="#{field_name}" name="#{field_name}" class="editable-input" placeholder="Enter text..." value="#{html_escaper.(field_value)}">
-                  <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
               </div>
           </div>
           """

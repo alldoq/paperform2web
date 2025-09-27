@@ -140,6 +140,12 @@ defmodule Paperform2webWeb.DocumentController do
     cond do
       # If both title and form_data are provided (from editing mode)
       Map.has_key?(params, "title") and Map.has_key?(params, "form_data") ->
+        # Add debugging
+        IO.puts("=== DOCUMENT UPDATE DEBUG ===")
+        IO.puts("Params received: #{inspect(Map.keys(params))}")
+        IO.puts("Is reorder: #{inspect(Map.get(params, "is_reorder", false))}")
+        IO.puts("Form data count: #{length(params["form_data"] || [])}")
+
         # Check if this is a reorder operation
         if Map.get(params, "is_reorder", false) do
           # For reorder operations, use the reorder function
@@ -185,6 +191,12 @@ defmodule Paperform2webWeb.DocumentController do
 
       # If only form_data is provided
       Map.has_key?(params, "form_data") ->
+        # Add debugging for form_data-only requests
+        IO.puts("=== FORM_DATA ONLY UPDATE DEBUG ===")
+        IO.puts("Params received: #{inspect(Map.keys(params))}")
+        IO.puts("Is reorder: #{inspect(Map.get(params, "is_reorder", false))}")
+        IO.puts("Form data count: #{length(params["form_data"] || [])}")
+
         if Map.get(params, "is_reorder", false) do
           # For reorder operations, use the reorder function
           field_order = Enum.with_index(params["form_data"], fn field, index ->

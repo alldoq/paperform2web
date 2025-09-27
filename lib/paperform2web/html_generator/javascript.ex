@@ -358,23 +358,27 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
 
                     /* Option editing styles */
                     .edit-options-btn {
-                        background: #3b82f6;
-                        color: white;
-                        border: none;
-                        border-radius: 50%;
-                        width: 24px;
-                        height: 24px;
+                        width: 20px;
+                        height: 20px;
+                        border-radius: 4px;
+                        border: 1px solid #d1d5db;
                         cursor: pointer;
-                        font-size: 12px;
                         display: inline-flex;
                         align-items: center;
                         justify-content: center;
-                        margin-left: 8px;
+                        font-size: 11px;
+                        font-weight: 500;
                         transition: all 0.2s ease;
+                        background: white;
+                        color: #6b7280;
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                        margin-left: 8px;
                     }
                     .edit-options-btn:hover {
-                        background: #2563eb;
-                        transform: scale(1.1);
+                        border-color: #9ca3af;
+                        color: #374151;
+                        transform: translateY(-1px);
+                        box-shadow: 0 2px 6px rgba(0,0,0,0.15);
                     }
                     .field-type-btn.selected {
                         border-color: #3b82f6;
@@ -1366,6 +1370,16 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                 field.style.position = 'relative';
                 field.appendChild(dragHandle);
 
+                // Add field controls (edit and remove buttons)
+                const fieldControls = document.createElement('div');
+                fieldControls.className = 'field-controls';
+                fieldControls.innerHTML = \`
+                    <button type="button" class="field-control-btn remove-field-btn" onclick="removeField(this)" title="Remove field">
+                        ×
+                    </button>
+                \`;
+                field.appendChild(fieldControls);
+
                     // Make the drag handle trigger mouse-based drag
                     let isDragging = false;
                     let dragStartY = 0;
@@ -1991,6 +2005,10 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                     if (window.isReorderOperation) {
                         requestBody.is_reorder = true;
                         console.log('🔄 Marking request as REORDER operation');
+                        console.log('🔄 Request body with reorder flag:', JSON.stringify(requestBody, null, 2));
+                    } else {
+                        console.log('⚠️ Regular save operation (no reorder flag)');
+                        console.log('⚠️ Request body:', JSON.stringify(requestBody, null, 2));
                     }
 
                     // Save to server
@@ -2017,19 +2035,13 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
         }
 
         function saveFormStructure() {
-            // Mark this as a reorder operation to prevent creating new fields
-            console.log('🔄 saveFormStructure called - this is a REORDER operation, not adding new fields');
+            // Skip saving entirely during reorder operations
+            console.log('🔄 saveFormStructure called - SKIPPING save operation to prevent duplicates');
+            console.log('🔄 Drag and drop reordering is visual-only, no database changes needed');
 
-            // Set a flag so saveFormData knows this is a reorder
-            window.isReorderOperation = true;
-
-            // Call regular save but with the reorder flag set
-            saveFormData();
-
-            // Clear the flag after a short delay
-            setTimeout(() => {
-                window.isReorderOperation = false;
-            }, 1000);
+            // Don't save anything during drag operations
+            // The order will be preserved by the browser until the user manually saves
+            return;
         }
 
         function setupAutoSave() {
@@ -2518,8 +2530,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                                 <option value="">Choose an option</option>
                                 ${optionsHtml}
                             </select>
-                            <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⚙️</button>
-                            <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
+                            <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                         </div>
                     </div>
                 \`;
@@ -2535,8 +2546,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                             <div class="radio-options">
                                 ${radioButtonsHtml}
                             </div>
-                            <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⚙️</button>
-                            <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
+                            <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                         </div>
                     </div>
                 \`;
@@ -2560,7 +2570,6 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                             <div class="form-field">
                                 <label for="${fieldId}" class="form-label editable-label" contenteditable="true">New Text Field</label>
                                 <input type="text" id="${fieldId}" name="${fieldName}" class="editable-input" placeholder="Enter text...">
-                                <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
                             </div>
                         </div>
                     \`;
@@ -2571,7 +2580,6 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                             <div class="form-field">
                                 <label for="${fieldId}" class="form-label editable-label" contenteditable="true">New Text Area</label>
                                 <textarea id="${fieldId}" name="${fieldName}" class="editable-textarea" rows="4" placeholder="Enter text..."></textarea>
-                                <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
                             </div>
                         </div>
                     \`;
@@ -2587,8 +2595,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                                     <option value="Option 2">Option 2</option>
                                     <option value="Option 3">Option 3</option>
                                 </select>
-                                <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⚙️</button>
-                                <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
+                                <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                             </div>
                         </div>
                     \`;
@@ -2603,8 +2610,7 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                                     <label><input type="radio" name="${fieldName}" value="Option 2"> Option 2</label>
                                     <label><input type="radio" name="${fieldName}" value="Option 3"> Option 3</label>
                                 </div>
-                                <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⚙️</button>
-                                <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
+                                <button class="edit-options-btn" onclick="editFieldOptions(this)" title="Edit options">⋯</button>
                             </div>
                         </div>
                     \`;
@@ -2615,7 +2621,6 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                             <div class="form-field checkbox-field">
                                 <input type="checkbox" id="${fieldId}" name="${fieldName}" value="checked">
                                 <label for="${fieldId}" class="editable-label" contenteditable="true">New Checkbox</label>
-                                <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
                             </div>
                         </div>
                     \`;
@@ -2626,7 +2631,6 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                             <div class="form-field">
                                 <label for="${fieldId}" class="form-label editable-label" contenteditable="true">Email Address</label>
                                 <input type="email" id="${fieldId}" name="${fieldName}" class="editable-input" placeholder="Enter email...">
-                                <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
                             </div>
                         </div>
                     \`;
@@ -2637,7 +2641,6 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                             <div class="form-field">
                                 <label for="${fieldId}" class="form-label editable-label" contenteditable="true">Phone Number</label>
                                 <input type="tel" id="${fieldId}" name="${fieldName}" class="editable-input" placeholder="Enter phone...">
-                                <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
                             </div>
                         </div>
                     \`;
@@ -2648,7 +2651,6 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                             <div class="form-field">
                                 <label for="${fieldId}" class="form-label editable-label" contenteditable="true">Date</label>
                                 <input type="date" id="${fieldId}" name="${fieldName}" class="editable-input">
-                                <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
                             </div>
                         </div>
                     \`;
@@ -2659,7 +2661,6 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                             <div class="form-field">
                                 <label for="${fieldId}" class="form-label editable-label" contenteditable="true">Number</label>
                                 <input type="number" id="${fieldId}" name="${fieldName}" class="editable-input" placeholder="Enter number...">
-                                <button class="delete-field-btn" onclick="deleteField(this)">🗑️</button>
                             </div>
                         </div>
                     \`;
@@ -2860,6 +2861,16 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             }
         }
 
+        function removeField(button) {
+            if (confirm('Remove this field?')) {
+                const field = button.closest('.editable-field');
+                if (field) {
+                    field.remove();
+                    saveFormData();
+                }
+            }
+        }
+
         function openShareDialog() {
             // Reuse the share dialog from standard JavaScript
             if (!window.documentId) {
@@ -3026,20 +3037,6 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                         from { transform: translateX(100%); opacity: 0; }
                         to { transform: translateX(0); opacity: 1; }
                     }
-                    .delete-field-btn {
-                        position: absolute;
-                        top: 5px;
-                        right: 5px;
-                        background: #ef4444;
-                        color: white;
-                        border: none;
-                        border-radius: 50%;
-                        width: 24px;
-                        height: 24px;
-                        cursor: pointer;
-                        font-size: 12px;
-                        display: none;
-                    }
                     .editable-field {
                         position: relative;
                         border: 2px dashed transparent;
@@ -3050,9 +3047,6 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
                     .editable-field:hover {
                         border-color: #3b82f6;
                         background-color: #eff6ff;
-                    }
-                    .editable-field:hover .delete-field-btn {
-                        display: block;
                     }
                 </style>
             \`;

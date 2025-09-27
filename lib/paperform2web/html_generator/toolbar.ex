@@ -245,45 +245,53 @@ defmodule Paperform2web.HtmlGenerator.Toolbar do
 
         .field-controls {
             position: absolute;
-            top: -10px;
-            right: -10px;
+            top: -8px;
+            right: -8px;
             display: flex;
-            gap: 0.25rem;
+            gap: 0.5rem;
             opacity: 0;
             transition: opacity 0.2s ease;
             z-index: 50;
         }
 
-        .editable-field-wrapper:hover .field-controls {
+        .editable-field-wrapper:hover .field-controls,
+        .editable-field:hover .field-controls {
             opacity: 1;
         }
 
         .field-control-btn {
-            width: 24px;
-            height: 24px;
-            border-radius: 50%;
-            border: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            border: 1px solid #d1d5db;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 12px;
+            font-size: 11px;
+            font-weight: 500;
             transition: all 0.2s ease;
-        }
-
-        .edit-btn {
-            background: #3498db;
-            color: white;
-        }
-
-        .delete-btn {
-            background: #e74c3c;
-            color: white;
+            background: white;
+            color: #6b7280;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
 
         .field-control-btn:hover {
-            transform: scale(1.1);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            border-color: #9ca3af;
+            color: #374151;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+        }
+
+        .remove-field-btn {
+            color: #dc2626 !important;
+            border-color: #fecaca !important;
+        }
+
+        .remove-field-btn:hover {
+            background: #fef2f2 !important;
+            border-color: #dc2626 !important;
+            color: #b91c1c !important;
         }
 
         /* Editable Content */
