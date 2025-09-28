@@ -24,8 +24,23 @@ defmodule Paperform2web.HtmlGenerator.Toolbar do
         <div class="toolbar-content">
             <h3>Form Preview</h3>
             <div class="toolbar-actions">
-                <button id="share-form" class="btn btn-primary">Share Form</button>
-                <button id="switch-to-edit" class="btn btn-secondary">Edit</button>
+                <!-- Page Navigation Section (for preview) -->
+                <div class="page-management">
+                    <div class="page-info">
+                        <span id="page-counter">Page 1 of 1</span>
+                    </div>
+                    <div class="page-controls">
+                        <button id="preview-prev-page" class="btn btn-secondary btn-small" disabled>‹</button>
+                        <button id="preview-next-page" class="btn btn-secondary btn-small" disabled>›</button>
+                    </div>
+                </div>
+
+                <!-- Form Actions Section -->
+                <div class="form-actions-toolbar">
+                    <button id="share-form" class="btn btn-primary">Share Form</button>
+                    <button id="switch-to-edit" class="btn btn-secondary">Edit</button>
+                </div>
+
                 #{generate_style_selector()}
             </div>
         </div>

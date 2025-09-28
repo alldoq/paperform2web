@@ -48,6 +48,9 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
 
             // Initialize form submission
             initializeFormSubmission();
+
+            // Initialize page navigation for preview mode
+            initializePreviewPageNavigation();
         });
 
         function initializeThemeSelector() {
@@ -1256,6 +1259,129 @@ defmodule Paperform2web.HtmlGenerator.Javascript do
             // Simple completion time calculation
             // In a real app, you'd track when the user started filling the form
             return Math.floor(Math.random() * 300) + 60; // Random 1-6 minutes for demo
+        }
+
+        // Preview Page Navigation Functions
+        let previewCurrentPageIndex = 0;
+        let previewPages = [];
+
+        function initializePreviewPageNavigation() {
+            loadPreviewPages();
+            updatePreviewPageControls();
+            initializePreviewNavButtons();
+        }
+
+        function loadPreviewPages() {
+            // Check if this is a PDF multipage document
+            const pdfPages = document.querySelectorAll('.pdf-page');
+
+            if (pdfPages.length > 0) {
+                // PDF multipage document
+                previewPages = Array.from(pdfPages);
+                console.log(`📄 Preview: Loaded ${previewPages.length} PDF page(s)`);
+
+                // Show first page initially
+                showPreviewPage(0);
+            } else {
+                // Check for form fields with data-page attributes (created in edit mode)
+                const allFields = document.querySelectorAll('[data-page]');
+                if (allFields.length > 0) {
+                    // Group fields by page
+                    const pageGroups = {};
+                    allFields.forEach(field => {
+                        const pageNum = field.getAttribute('data-page') || '0';
+                        if (!pageGroups[pageNum]) {
+                            pageGroups[pageNum] = [];
+                        }
+                        pageGroups[pageNum].push(field);
+                    });
+
+                    previewPages = Object.keys(pageGroups).sort().map(pageNum => ({
+                        pageNumber: parseInt(pageNum),
+                        fields: pageGroups[pageNum]
+                    }));
+
+                    console.log(`📄 Preview: Loaded ${previewPages.length} form page(s)`);
+                    showPreviewPage(0);
+                } else {
+                    // Single page form
+                    previewPages = [{ pageNumber: 0, fields: [] }];
+                    console.log(`📄 Preview: Single page form`);
+                }
+            }
+        }
+
+        function initializePreviewNavButtons() {
+            const prevBtn = document.getElementById('preview-prev-page');
+            const nextBtn = document.getElementById('preview-next-page');
+
+            if (prevBtn) {
+                prevBtn.addEventListener('click', goToPreviewPreviousPage);
+            }
+            if (nextBtn) {
+                nextBtn.addEventListener('click', goToPreviewNextPage);
+            }
+        }
+
+        function goToPreviewPreviousPage() {
+            if (previewCurrentPageIndex > 0) {
+                previewCurrentPageIndex--;
+                showPreviewPage(previewCurrentPageIndex);
+                updatePreviewPageControls();
+            }
+        }
+
+        function goToPreviewNextPage() {
+            if (previewCurrentPageIndex < previewPages.length - 1) {
+                previewCurrentPageIndex++;
+                showPreviewPage(previewCurrentPageIndex);
+                updatePreviewPageControls();
+            }
+        }
+
+        function showPreviewPage(pageIndex) {
+            console.log(`📄 Preview: Switching to page ${pageIndex + 1}`);
+
+            // Check if we have PDF pages
+            const pdfPages = document.querySelectorAll('.pdf-page');
+
+            if (pdfPages.length > 0) {
+                // Handle PDF pages
+                pdfPages.forEach((page, index) => {
+                    page.style.display = index === pageIndex ? 'block' : 'none';
+                });
+            } else {
+                // Handle form fields with data-page attributes
+                const allFields = document.querySelectorAll('[data-page]');
+                allFields.forEach(field => {
+                    field.style.display = 'none';
+                });
+
+                const currentPageFields = document.querySelectorAll(`[data-page="${pageIndex}"]`);
+                currentPageFields.forEach(field => {
+                    field.style.display = 'block';
+                });
+
+                console.log(`📄 Preview: Showing ${currentPageFields.length} fields for page ${pageIndex + 1}`);
+            }
+        }
+
+        function updatePreviewPageControls() {
+            const pageCounter = document.getElementById('page-counter');
+            const prevBtn = document.getElementById('preview-prev-page');
+            const nextBtn = document.getElementById('preview-next-page');
+
+            if (pageCounter) {
+                pageCounter.textContent = `Page ${previewCurrentPageIndex + 1} of ${previewPages.length}`;
+            }
+
+            if (prevBtn) {
+                prevBtn.disabled = previewCurrentPageIndex <= 0;
+            }
+
+            if (nextBtn) {
+                nextBtn.disabled = previewCurrentPageIndex >= previewPages.length - 1;
+            }
         }
 
     </script>
