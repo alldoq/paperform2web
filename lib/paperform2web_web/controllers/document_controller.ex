@@ -3,7 +3,6 @@ defmodule Paperform2webWeb.DocumentController do
 
   alias Paperform2web.Documents
   alias Paperform2web.Documents.Document
-  alias Paperform2web.Templates
 
   action_fallback Paperform2webWeb.FallbackController
 
@@ -49,25 +48,49 @@ defmodule Paperform2webWeb.DocumentController do
     render(conn, :process_status, document: document)
   end
 
-  def html_output(conn, %{"document_id" => id} = params) do
+  # Deprecated: HTML rendering now handled by frontend
+  def html_output(conn, %{"document_id" => _id}) do
+    conn
+    |> put_status(:gone)
+    |> json(%{
+      error: "HTML generation has been deprecated",
+      message: "Please use the /form-data endpoint to get JSON data for frontend rendering"
+    })
+  end
+
+  # NEW: JSON endpoint for form data
+  def form_data(conn, %{"document_id" => id}) do
     document = Documents.get_document!(id)
-    editing_mode = Map.get(params, "editing", "false") == "true"
-    theme = Map.get(params, "theme", document.theme || "default")
 
     case document.status do
-      "completed" -> html_content = Documents.generate_html_with_options(document, %{
-          editing: editing_mode,
-          document_id: id,
-          theme: theme
-        })
+      "completed" ->
+        form_data = Documents.get_form_json_data(document)
+
         conn
-        |> put_resp_content_type("text/html")
-        |> send_resp(200, html_content)
+        |> json(%{
+          data: %{
+            id: document.id,
+            filename: document.filename,
+            title: document.filename,  # Use filename as title since title field doesn't exist
+            theme: document.theme || "default",
+            status: document.status,
+            form_fields: form_data,
+            metadata: %{
+              created_at: document.inserted_at,
+              updated_at: document.updated_at,
+              total_pages: get_in(document.processed_data, ["metadata", "page_count"]) || 1
+            }
+          }
+        })
 
       _ ->
         conn
         |> put_status(:accepted)
-        |> json(%{message: "Document is still processing", status: document.status})
+        |> json(%{
+          message: "Document is still processing",
+          status: document.status,
+          progress: document.progress
+        })
     end
   end
 
@@ -85,8 +108,20 @@ defmodule Paperform2webWeb.DocumentController do
     end
   end
 
+  # Deprecated: Templates now handled on frontend
   def list_templates(conn, _params) do
-    templates = Templates.list_active_templates()
+    # Return hardcoded list of available themes for backward compatibility
+    templates = [
+      %{value: "default", name: "Professional"},
+      %{value: "minimal", name: "Minimal"},
+      %{value: "dark", name: "Dark Mode"},
+      %{value: "modern", name: "Modern"},
+      %{value: "classic", name: "Classic"},
+      %{value: "colorful", name: "Colorful"},
+      %{value: "professional", name: "Corporate"},
+      %{value: "vibrant", name: "Vibrant"}
+    ]
+
     conn
     |> json(%{data: templates})
   end
@@ -328,19 +363,26 @@ defmodule Paperform2webWeb.DocumentController do
           # Record the form open
           Documents.record_form_open(token)
 
-          # Return the form HTML
+          # Return the form data as JSON
           document = share.document
 
           if document.status == "completed" do
-            html_content = Documents.generate_html_with_options(document, %{
-              editing: false,
-              shared: true,
-              share_token: token
-            })
+            form_data = Documents.get_form_json_data(document)
 
             conn
-            |> put_resp_content_type("text/html")
-            |> send_resp(200, html_content)
+            |> json(%{
+              data: %{
+                share_token: token,
+                document_id: document.id,
+                title: document.filename,  # Use filename as title since title field doesn't exist
+                theme: document.theme || "default",
+                form_fields: form_data,
+                metadata: %{
+                  created_at: document.inserted_at,
+                  expires_at: share.expires_at
+                }
+              }
+            })
           else
             conn
             |> put_status(:accepted)

@@ -12,7 +12,9 @@
     "@heroicons/vue": "^2.0.18",
     "axios": "^1.6.0",
     "phoenix": "^1.8.1",
-    "vue": "^3.4.0"
+    "vue": "^3.4.0",
+    "vue-router": "^4.6.3",
+    "vuedraggable": "^4.1.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.0.0",

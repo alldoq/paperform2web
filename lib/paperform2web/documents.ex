@@ -10,8 +10,6 @@ defmodule Paperform2web.Documents do
   alias Paperform2web.Documents.FormResponse
   alias Paperform2web.Documents.ResponseAnalytics
   alias Paperform2web.DocumentProcessor
-  alias Paperform2web.HtmlGenerator
-  alias Paperform2web.Templates
   alias Paperform2web.Mailer
   alias Paperform2web.Emails.ShareEmail
   require Logger
@@ -36,10 +34,7 @@ defmodule Paperform2web.Documents do
   @doc """
   Creates a document and starts processing.
   """
-  def create_document(file_params, model \\ "llama2", template_slug \\ "default") do
-    # Get template by slug, fallback to default
-    template = Templates.get_template_by_slug(template_slug) || Templates.get_default_template()
-    
+  def create_document(file_params, model \\ "llama2", theme \\ "default") do
     case validate_and_save_file(file_params) do
       {:ok, file_path, filename, content_type} ->
         case DocumentProcessor.validate_file_format(content_type) do
@@ -49,8 +44,7 @@ defmodule Paperform2web.Documents do
               file_path: file_path,
               content_type: content_type,
               model_used: model,
-              template_id: template && template.id,
-              theme: template_slug, # Keep theme for backward compatibility
+              theme: theme,
               status: "uploaded",
               progress: 0
             }
@@ -186,24 +180,52 @@ defmodule Paperform2web.Documents do
         IO.puts("  Metadata: #{inspect(field_metadata)}")
       end
 
-      %{
-        "type" => "form_input",  # Always use form_input for user-added fields
+      # Map frontend field type to backend section type
+      backend_section_type = map_field_type_to_section_type(field["type"])
+
+      base_section = %{
+        "type" => backend_section_type,
         "content" => field_content,
-        "metadata" => Map.merge(field_metadata, %{
-          "input_type" => field_type,
-          "field_name" => get_in(field, ["metadata", "field_name"]) || field["fieldName"] || sanitize_field_name(field_content),
-          "required" => get_in(field, ["metadata", "required"]) || field["required"] || false
-        }),
-        "formatting" => %{
+        "metadata" => field_metadata,
+        "formatting" => field["formatting"] || %{
           "alignment" => "left",
           "font_size" => "medium",
           "bold" => false,
           "italic" => false,
           "width" => field["width"] || "full"
         },
-        "position" => %{"x" => 0, "y" => index * 50, "width" => 400, "height" => 30},
-        "form_field_id" => field_id  # Mark as user-added form field
+        "position" => field["position"] || %{"x" => 0, "y" => index * 50, "width" => 400, "height" => 30},
+        "form_field_id" => field_id
       }
+
+      # Add type-specific metadata
+      case field["type"] do
+        "input" ->
+          put_in(base_section, ["metadata", "input_type"], field_type)
+          |> put_in(["metadata", "field_name"], get_in(field, ["metadata", "field_name"]) || field["field_name"] || sanitize_field_name(field_content))
+          |> put_in(["metadata", "required"], get_in(field, ["metadata", "required"]) || field["required"] || false)
+
+        "textarea" ->
+          put_in(base_section, ["metadata", "field_name"], get_in(field, ["metadata", "field_name"]) || field["field_name"] || sanitize_field_name(field_content))
+          |> put_in(["metadata", "required"], get_in(field, ["metadata", "required"]) || field["required"] || false)
+          |> put_in(["metadata", "rows"], field["rows"] || 4)
+
+        "checkbox" ->
+          put_in(base_section, ["metadata", "field_name"], get_in(field, ["metadata", "field_name"]) || field["field_name"] || sanitize_field_name(field_content))
+          |> put_in(["metadata", "required"], get_in(field, ["metadata", "required"]) || field["required"] || false)
+          |> put_in(["metadata", "value"], field["value"] || field_content)
+
+        "radio" ->
+          put_in(base_section, ["metadata", "field_name"], get_in(field, ["metadata", "field_name"]) || field["field_name"] || sanitize_field_name(field_content))
+          |> put_in(["metadata", "required"], get_in(field, ["metadata", "required"]) || field["required"] || false)
+          |> put_in(["metadata", "value"], field["value"] || "")
+
+        "heading" ->
+          put_in(base_section, ["metadata", "level"], field["level"] || 2)
+
+        _ ->
+          base_section
+      end
     end)
 
     IO.puts("🔧 NEW FORM SECTIONS CREATED:")
@@ -224,30 +246,26 @@ defmodule Paperform2web.Documents do
     end)
 
     # Create a mapping to track which frontend fields we've processed
-    frontend_field_ids = MapSet.new(Enum.map(unique_form_fields, fn field -> field["id"] end))
+    _frontend_field_ids = MapSet.new(Enum.map(unique_form_fields, fn field -> field["id"] end))
 
     # Build the final sections array respecting frontend order
+    # IMPORTANT: The frontend sends ALL fields in the desired order,
+    # so we should use ONLY the ordered sections, not prepend preserved sections
     ordered_form_sections = Enum.map(unique_form_fields, fn field ->
       field_id = field["id"]
       Map.get(new_sections_by_id, field_id)
     end)
     |> Enum.filter(fn section -> section != nil end)
 
-    # Keep only non-form sections that don't conflict with our ordered fields
-    preserved_sections = Enum.filter(existing_sections, fn section ->
-      !Map.has_key?(section, "form_field_id")
-    end)
+    # Final structure: ONLY use ordered form sections
+    # The frontend already includes everything (headings, labels, inputs) in the correct order
+    combined_sections = ordered_form_sections
 
-    # Final structure: preserved content + ordered form sections
-    combined_sections = preserved_sections ++ ordered_form_sections
-
-    IO.puts("Preserved sections count: #{length(preserved_sections)}")
     IO.puts("Ordered form sections count: #{length(ordered_form_sections)}")
     IO.puts("Frontend ordered field IDs: #{inspect(Enum.map(unique_form_fields, &(&1["id"])))}")
 
     IO.puts("=== ORDERED FORM STRUCTURE DEBUG ===")
     IO.puts("Total sections: #{length(combined_sections)}")
-    IO.puts("Preserved sections: #{length(preserved_sections)}")
     IO.puts("Ordered form sections: #{length(ordered_form_sections)}")
     IO.puts("Final section order:")
     combined_sections
@@ -305,7 +323,18 @@ defmodule Paperform2web.Documents do
       updated_processed_data
     end
 
-    update_document(document, %{processed_data: final_processed_data})
+    result = update_document(document, %{processed_data: final_processed_data})
+
+    case result do
+      {:ok, updated_doc} ->
+        IO.puts("✅ FORM STRUCTURE SAVED SUCCESSFULLY")
+        IO.puts("Updated sections count: #{length(get_in(updated_doc.processed_data, ["content", "sections"]) || [])}")
+        {:ok, updated_doc}
+      {:error, changeset} ->
+        IO.puts("❌ FORM STRUCTURE SAVE FAILED")
+        IO.inspect(changeset.errors, label: "Errors")
+        {:error, changeset}
+    end
   end
 
   @doc """
@@ -382,32 +411,6 @@ defmodule Paperform2web.Documents do
     update_document(document, %{processed_data: final_processed_data})
   end
 
-  defp determine_section_type(field_type) do
-    case field_type do
-      "checkbox" -> "checkbox"
-      "radio" -> "radio"
-      "select" -> "select"
-      "textarea" -> "textarea"
-      "email" -> "email"
-      "date" -> "date"
-      _ -> "text"
-    end
-  end
-
-  defp build_field_metadata(field) do
-    base_metadata = %{}
-
-    case field["fieldType"] do
-      "select" ->
-        Map.put(base_metadata, "options", field["options"] || ["Option 1", "Option 2", "Option 3"])
-      "radio" ->
-        Map.put(base_metadata, "options", field["options"] || ["Option 1", "Option 2", "Option 3"])
-      "checkbox" ->
-        Map.put(base_metadata, "checked", false)
-      _ ->
-        base_metadata
-    end
-  end
 
   # Helper functions to extract field data from different structures
   defp get_field_type(field) do
@@ -471,46 +474,142 @@ defmodule Paperform2web.Documents do
     Repo.delete(document)
   end
 
+
   @doc """
-  Generates HTML from a processed document.
+  Gets the form data as clean JSON for frontend rendering.
+  Returns a structured format suitable for frontend form generation.
   """
-  def generate_html(%Document{processed_data: nil}), do: "<p>Document not yet processed</p>"
-  def generate_html(%Document{processed_data: processed_data, template_id: template_id, theme: theme, status: "completed"} = document) do
-    # Always use theme-based CSS generation, ignore template database for now
-    effective_theme = theme || "default"
-    
-    options = %{
-      template: nil, # Force use of theme-based CSS
-      theme: effective_theme
+  def get_form_json_data(%Document{processed_data: nil}), do: []
+  def get_form_json_data(%Document{processed_data: processed_data, status: "completed"}) do
+    sections = get_in(processed_data, ["content", "sections"]) || []
+
+    # Transform sections into a cleaner format for frontend
+    sections
+    |> Enum.map(&transform_section_to_json/1)
+    |> Enum.filter(&(&1 != nil))
+  end
+  def get_form_json_data(_document), do: []
+
+  # Transform backend section format to cleaner frontend format
+  defp transform_section_to_json(section) do
+    base_field = %{
+      id: section["form_field_id"] || generate_field_id(),
+      type: map_section_type_to_field_type(section["type"]),
+      label: section["content"] || "",
+      metadata: section["metadata"] || %{},
+      position: section["position"] || %{"x" => 0, "y" => 0},
+      formatting: section["formatting"] || %{}
     }
-    
-    case HtmlGenerator.generate_html(processed_data, options) do
-      {:ok, html} -> html
-      {:error, _reason} -> "<p>Error generating HTML from processed data</p>"
+
+    # Add field-specific properties
+    case section["type"] do
+      "form_input" ->
+        Map.merge(base_field, %{
+          input_type: get_in(section, ["metadata", "input_type"]) || "text",
+          field_name: get_in(section, ["metadata", "field_name"]) || generate_field_name(),
+          required: get_in(section, ["metadata", "required"]) || false,
+          placeholder: get_in(section, ["metadata", "placeholder"]) || ""
+        })
+
+      "form_textarea" ->
+        Map.merge(base_field, %{
+          field_name: get_in(section, ["metadata", "field_name"]) || generate_field_name(),
+          required: get_in(section, ["metadata", "required"]) || false,
+          placeholder: get_in(section, ["metadata", "placeholder"]) || "",
+          rows: get_in(section, ["metadata", "rows"]) || 4
+        })
+
+      "form_select" ->
+        Map.merge(base_field, %{
+          field_name: get_in(section, ["metadata", "field_name"]) || generate_field_name(),
+          required: get_in(section, ["metadata", "required"]) || false,
+          options: get_in(section, ["metadata", "options"]) || []
+        })
+
+      "form_radio" ->
+        Map.merge(base_field, %{
+          field_name: get_in(section, ["metadata", "field_name"]) || generate_field_name(),
+          required: get_in(section, ["metadata", "required"]) || false,
+          options: get_in(section, ["metadata", "options"]) || [],
+          value: get_in(section, ["metadata", "value"]) || ""
+        })
+
+      "form_checkbox" ->
+        Map.merge(base_field, %{
+          field_name: get_in(section, ["metadata", "field_name"]) || generate_field_name(),
+          required: get_in(section, ["metadata", "required"]) || false,
+          value: get_in(section, ["metadata", "value"]) || section["content"]
+        })
+
+      "form_label" ->
+        Map.merge(base_field, %{
+          text: section["content"] || ""
+        })
+
+      "form_title" ->
+        Map.merge(base_field, %{
+          text: section["content"] || "",
+          level: get_in(section, ["metadata", "level"]) || 1
+        })
+
+      "form_section" ->
+        # Section headers are treated as headings (H2)
+        Map.merge(base_field, %{
+          text: section["content"] || "",
+          level: 2
+        })
+
+      "text" ->
+        # Plain text sections are labels
+        Map.merge(base_field, %{
+          text: section["content"] || ""
+        })
+
+      _ ->
+        # Unknown types default to label
+        Map.merge(base_field, %{
+          text: section["content"] || ""
+        })
     end
   end
-  def generate_html(_document), do: "<p>Document processing not completed</p>"
 
-  @doc """
-  Generates HTML from a processed document with additional options.
-  """
-  def generate_html_with_options(%Document{processed_data: nil}, _options), do: "<p>Document not yet processed</p>"
-  def generate_html_with_options(%Document{processed_data: processed_data, template_id: template_id, theme: theme, status: "completed"} = document, additional_options) do
-    # Always use theme-based CSS generation, ignore template database for now
-    # Use theme from additional_options if provided, otherwise fall back to document theme
-    effective_theme = Map.get(additional_options, :theme, theme || "default")
-
-    options = Map.merge(%{
-      template: nil, # Force use of theme-based CSS
-      theme: effective_theme
-    }, additional_options)
-    
-    case HtmlGenerator.generate_html(processed_data, options) do
-      {:ok, html} -> html
-      {:error, _reason} -> "<p>Error generating HTML from processed data</p>"
+  # Map backend section types to frontend field types
+  defp map_section_type_to_field_type(type) do
+    case type do
+      "form_input" -> "input"
+      "form_textarea" -> "textarea"
+      "form_select" -> "select"
+      "form_radio" -> "radio"
+      "form_checkbox" -> "checkbox"
+      "form_label" -> "label"
+      "form_title" -> "heading"
+      "form_section" -> "heading"  # Section headers are headings
+      "text" -> "label"            # Plain text is a label
+      _ -> "label"                 # Default unknown types to label to avoid input fields
     end
   end
-  def generate_html_with_options(_document, _options), do: "<p>Document processing not completed</p>"
+
+  # Map frontend field types to backend section types
+  defp map_field_type_to_section_type(type) do
+    case type do
+      "input" -> "form_input"
+      "textarea" -> "form_textarea"
+      "select" -> "form_select"
+      "radio" -> "form_radio"
+      "checkbox" -> "form_checkbox"
+      "label" -> "form_label"
+      "heading" -> "form_title"
+      _ -> "form_label"  # Default to label for unknown types
+    end
+  end
+
+  defp generate_field_id do
+    "field_#{:rand.uniform(999999)}"
+  end
+
+  defp generate_field_name do
+    "field_#{:rand.uniform(999999)}"
+  end
 
   defp create_document_record(attrs) do
     %Document{}

@@ -109,6 +109,11 @@ export const documentsApi = {
     })
   },
 
+  // Get document form data as JSON (new endpoint)
+  getDocumentFormData: (id) => {
+    return api.get(`/documents/${id}/form-data`)
+  },
+
   // Delete a document
   deleteDocument: (id) => {
     return api.delete(`/documents/${id}`)

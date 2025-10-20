@@ -6,7 +6,7 @@ defmodule Paperform2web.OllamaClient do
 
   require Logger
 
-  @default_model "openai/gpt-5-mini"
+  @default_model "openai/gpt-5"
   @default_url "https://openrouter.ai/api/v1"
 
   @type auth_config :: %{
@@ -54,11 +54,12 @@ defmodule Paperform2web.OllamaClient do
   def list_models do
     # OpenRouter has different model listing - return common models for now
     {:ok, [
-      "openai/gpt-4o",
-      "openai/gpt-4o-mini", 
-      "anthropic/claude-3.5-sonnet",
-      "anthropic/claude-3-haiku",
-      "google/gemini-pro-vision"
+      "openai/gpt-4o",           # Best for complex forms, most accurate
+      "openai/gpt-4o-mini",      # Faster, cheaper, still very good
+      "anthropic/claude-3.5-sonnet",  # Excellent reasoning
+      "anthropic/claude-3-haiku",     # Fast and affordable
+      "google/gemini-pro-1.5",        # Good vision capabilities
+      "google/gemini-flash-1.5"       # Fast and efficient
     ]}
   end
 
@@ -122,355 +123,101 @@ defmodule Paperform2web.OllamaClient do
 
   defp build_document_processing_prompt(options) do
     base_prompt = """
-    You are an ADVANCED FORM ANALYSIS AI specialized in VISUAL RECOGNITION of form elements. Your ONLY job is to convert form documents into interactive HTML forms by accurately identifying field types from VISUAL CUES.
+    You are a FORM FIELD RECOGNITION SPECIALIST. Analyze this form image and convert it to structured JSON.
 
-    CRITICAL MISSION: Analyze the image pixel by pixel to identify form elements and their EXACT types. Every fillable area MUST become the CORRECT interactive input type based on VISUAL INDICATORS.
+    🚨 CRITICAL RULES - READ THESE FIRST:
 
-    🎯 VISUAL RECOGNITION PRIORITY:
-    1. EXAMINE VISUAL SHAPES AND PATTERNS FIRST
-    2. READ LABELS AND CONTEXT SECOND
-    3. MATCH TO APPROPRIATE INPUT TYPE
-    4. RECOGNIZE QUESTION-OPTION RELATIONSHIPS
+    1. **VISUAL SHAPES DETERMINE FIELD TYPE** - Look at the SHAPE, not just the text:
+       - □ ☐ Square box = checkbox
+       - ○ ● Circle = radio button
+       - ▼ ↓ Arrow = dropdown/select
+       - Large rectangle = textarea
+       - DD/MM/YYYY pattern = date field
+       - ___ Underline = text input
 
-    🚨 MOST IMPORTANT: QUESTION + YES/NO PATTERN RECOGNITION
-    When you see a pattern like:
-    "16 Do you intend to live outside the UK permanently?"
-    [followed by]
-    "No" [with input area]
-    "Yes" [with input area]
+    2. **LABEL vs INPUT DECISION**:
+       - If text is DESCRIPTIVE (question, instruction, heading) → form_label or form_section
+       - If area is FILLABLE (user can type/select) → form_input
+       - NEVER create both a label AND a text input for the same text!
 
-    This is ONE question with TWO radio button options, NOT three separate questions!
+    3. **YES/NO PATTERNS** (Most common error):
+       - Question + "Yes □" and "No □" = ONE question with TWO radio buttons
+       - SAME field_name for both options, DIFFERENT field_value
+       - Example: "Do you agree?" → form_label, then "Yes" radio + "No" radio
 
-    CRITICAL OUTPUT PATTERN:
-    1. Create ONE form_label with the full question text (including number)
-    2. Create TWO form_input entries with input_type="radio"
-    3. Both radio inputs MUST have the SAME field_name
-    4. Each radio input MUST have different field_value ("no", "yes")
-    5. The radio inputs should have content="No" and content="Yes"
+    4. **GOVERNMENT FORM PATTERNS**:
+       - Sequential boxes [__][__][____] = date field (DD/MM/YYYY)
+       - Small squares next to options = checkboxes or radio buttons
+       - Large address boxes = textarea
+       - Question numbers are part of the label text
 
-    NEVER create separate form_label entries for "No" and "Yes" - they are OPTIONS, not questions!
+    🎯 FIELD TYPE QUICK REFERENCE:
 
-    Return your analysis in this JSON format:
+    | Visual Cue | Input Type | Example |
+    |------------|------------|---------|
+    | □ ☐ Square | checkbox | "□ I agree" |
+    | ○ ● Circle | radio | "○ Male ○ Female" |
+    | ▼ Arrow | select | "Country [Select ▼]" |
+    | [__][__][____] | date | "DD MM YYYY" |
+    | Large box | textarea | Multi-line address |
+    | @ symbol | email | "Email: user@example.com" |
+    | Phone pattern | tel | "(123) 456-7890" |
+    | "age", "quantity" | number | "Age: ___" |
+    | ___ Underline | text | "Name: _______" |
+
+    📋 JSON STRUCTURE:
 
     {
       "document_type": "form",
-      "title": "Form title if available",
+      "title": "Form title",
       "content": {
         "sections": [
           {
-            "type": "form_title|form_section|form_label|form_input|form_group",
-            "content": "text content or label",
-            "formatting": {
-              "bold": true/false,
-              "italic": true/false,
-              "font_size": "small|medium|large",
-              "alignment": "left|center|right"
-            },
+            "type": "form_title|form_section|form_label|form_input",
+            "content": "text or label",
             "metadata": {
-              "input_type": "text|email|date|time|number|tel|url|password|textarea|select|checkbox|radio",
-              "field_name": "field_name",
-              "field_value": "pre-filled value",
-              "options": ["option1", "option2"],
-              "required": true/false,
-              "placeholder": "placeholder text",
-              "visual_cue": "description of what you see"
+              "input_type": "text|email|date|number|tel|textarea|select|checkbox|radio",
+              "field_name": "snake_case_name",
+              "field_value": "pre-filled value (for radio/checkbox)",
+              "options": ["opt1", "opt2"],
+              "required": true
             }
           }
         ]
-      },
-      "metadata": {
-        "language": "detected language",
-        "confidence": 0.95,
-        "total_fields": 5,
-        "processing_notes": "visual analysis details"
       }
     }
 
-    🔍 VISUAL PATTERN RECOGNITION GUIDE:
+    ✅ CORRECT EXAMPLES:
 
-    📋 CHECKBOX IDENTIFICATION (Priority: HIGHEST):
-    LOOK FOR THESE EXACT VISUAL PATTERNS:
-    ✓ Square boxes: □ ☐ ▢ ◯ (empty or filled)
-    ✓ Checkmarks: ☑ ✓ ✗ ✔
-    ✓ Small boxes next to text: "□ I agree" "☑ Yes" "▢ No"
-    ✓ Multiple choice options with boxes
-    ✓ FORMS WITH YES/NO OPTIONS: Look for small squares next to "Yes" or "No" text
-    ✓ GOVERNMENT FORMS: Often have small rectangular boxes for selection
-    ✓ Any small rectangular shape that appears clickable or selectable
-    ✓ Boxes that appear in pairs or groups with labels
-    → ALWAYS classify as input_type: "checkbox"
+    1. **Checkbox**: Visual "□ I agree to terms"
+       → {"type": "form_input", "content": "I agree to terms", "metadata": {"input_type": "checkbox", "field_name": "agree_terms"}}
 
-    🔘 RADIO BUTTON IDENTIFICATION (Enhanced):
-    LOOK FOR THESE EXACT VISUAL PATTERNS:
-    ✓ Circular shapes: ○ ● ◯ ◉ ⚪ ⚫
-    ✓ Dots or circles next to options: "○ Male ○ Female"
-    ✓ Single selection groups with circles
-    ✓ YES/NO PAIRS: When you see "Yes □ No □" pattern, these are often radio buttons
-    ✓ MUTUALLY EXCLUSIVE OPTIONS: Options where only one can be selected
-    ✓ Look for options that are clearly alternatives to each other
-    → ALWAYS classify as input_type: "radio" when options are mutually exclusive
-    → Use input_type: "checkbox" when multiple selections are possible
+    2. **Radio Group**: Visual "Gender: ○ Male ○ Female"
+       → {"type": "form_label", "content": "Gender:"}
+       → {"type": "form_input", "content": "Male", "metadata": {"input_type": "radio", "field_name": "gender", "field_value": "male"}}
+       → {"type": "form_input", "content": "Female", "metadata": {"input_type": "radio", "field_name": "gender", "field_value": "female"}}
 
-    📋 DROPDOWN/SELECT IDENTIFICATION:
-    LOOK FOR THESE EXACT VISUAL PATTERNS:
-    ✓ Dropdown arrows: ▼ ↓ ⬇ ⇓ ♦
-    ✓ Rectangular boxes with arrows on the right
-    ✓ Text like "Select..." "Choose..." "Pick..."
-    ✓ Lists of options that appear to be selectable
-    → ALWAYS classify as input_type: "select"
+    3. **Date Field**: Visual "Date of birth DD MM YYYY [__][__][____]"
+       → {"type": "form_label", "content": "Date of birth"}
+       → {"type": "form_input", "content": "", "metadata": {"input_type": "date", "field_name": "date_of_birth"}}
 
-    📝 TEXT AREA IDENTIFICATION:
-    LOOK FOR THESE EXACT VISUAL PATTERNS:
-    ✓ Large rectangular boxes (wider and taller than regular inputs)
-    ✓ Multi-line spaces for text
-    ✓ Labels like: "Comments" "Description" "Address" "Notes"
-    ✓ Boxes that are clearly bigger than single-line inputs
-    → ALWAYS classify as input_type: "textarea"
+    4. **Yes/No Radio**: Visual "16 Do you agree?" with "No □" and "Yes □"
+       → {"type": "form_label", "content": "16 Do you agree?"}
+       → {"type": "form_input", "content": "No", "metadata": {"input_type": "radio", "field_name": "question_16_agree", "field_value": "no"}}
+       → {"type": "form_input", "content": "Yes", "metadata": {"input_type": "radio", "field_name": "question_16_agree", "field_value": "yes"}}
 
-    📅 DATE FIELD IDENTIFICATION (Enhanced):
-    LOOK FOR THESE EXACT VISUAL PATTERNS:
-    ✓ Date formats: DD/MM/YYYY, MM/DD/YYYY, __/__/__
-    ✓ Multiple small boxes in sequence: [__] [__] [____] or [__] / [__] / [____]
-    ✓ Calendar icons: 📅 🗓
-    ✓ Labels containing: "date" "birth" "dob" "expire" "due" "leaving" "arrival"
-    ✓ Slash or dash separators for dates: DD/MM/YYYY, DD-MM-YYYY
-    ✓ GOVERNMENT FORMS: Often show as separate boxes for day, month, year
-    ✓ Sequential numbered boxes (day/month/year pattern)
-    ✓ Text showing format like "DD MM YYYY" or similar
-    → ALWAYS classify as input_type: "date"
-
-    ⏰ TIME FIELD IDENTIFICATION:
-    ✓ Time formats: HH:MM, __:__
-    ✓ AM/PM indicators
-    ✓ Clock symbols: 🕐 ⏰
-    ✓ Labels containing: "time" "hour" "appointment"
-    → ALWAYS classify as input_type: "time"
-
-    📧 EMAIL FIELD IDENTIFICATION:
-    ✓ @ symbols visible
-    ✓ Labels containing: "email" "e-mail" "@"
-    ✓ Example text like "user@example.com"
-    → ALWAYS classify as input_type: "email"
-
-    📞 PHONE FIELD IDENTIFICATION:
-    ✓ Phone number patterns: (XXX) XXX-XXXX, +1-XXX-XXX-XXXX
-    ✓ Labels containing: "phone" "tel" "mobile" "cell"
-    ✓ Country codes: +1, +44, etc.
-    → ALWAYS classify as input_type: "tel"
-
-    🔢 NUMBER FIELD IDENTIFICATION:
-    ✓ Labels containing: "age" "quantity" "amount" "count" "number" "ID" "zip" "postal"
-    ✓ Numeric patterns or examples
-    → ALWAYS classify as input_type: "number"
-
-    📄 TEXT FIELD (DEFAULT):
-    ✓ Simple lines: _________ ___________
-    ✓ Empty rectangular boxes
-    ✓ Labels like: "name" "address" "city" "title"
-    → ALWAYS classify as input_type: "text"
-
-    ⚠️ CRITICAL ANALYSIS RULES:
-    1. VISUAL SHAPE OVERRIDES TEXT CONTENT
-    2. If you see □ → ALWAYS checkbox, regardless of text
-    3. If you see ○ → ALWAYS radio button, regardless of text
-    4. If you see ▼ → ALWAYS select dropdown, regardless of text
-    5. Large boxes → ALWAYS textarea, regardless of text
-    6. YES/NO PAIRS → Usually radio buttons (mutually exclusive)
-    7. Multiple checkboxes in a row → Often checkboxes for multiple selection
-    8. Sequential small boxes → Usually date fields (DD/MM/YYYY)
-    9. GOVERNMENT FORMS: Be extra careful - they use many checkboxes and date fields
-
-    📋 SPECIAL FORM PATTERNS (CRITICAL):
-    ✓ "Yes □ No □" → Two radio buttons with same field_name, different values
-    ✓ QUESTION + YES/NO PAIR: When you see a question followed by "No" and "Yes" sections, these are ONE question with TWO radio button options
-    ✓ Multiple address lines → textarea field
-    ✓ Postcode/ZIP fields → text input (short)
-    ✓ Question numbers followed by checkboxes → checkbox fields
-    ✓ Instructions like "If Yes, please..." → conditional checkbox logic
-
-    🚨 CRITICAL: YES/NO GROUPING RULES:
-    1. If you see a QUESTION followed by separate "No" and "Yes" sections, they belong to the SAME question
-    2. Generate ONE form_label for the question + TWO form_input radio buttons
-    3. Both radio buttons must have the SAME field_name but different field_values
-    4. NEVER create separate questions for Yes and No - they are options for the same question
-    5. NEVER create form_label entries for "Yes" or "No" - they go in form_input content
-    6. The question NUMBER should be included in the form_label content
-
-    🔥 ANTI-PATTERN TO AVOID:
-    ❌ WRONG: Three separate sections for "16 Do you intend...", "No", "Yes"
-    ✅ CORRECT: One form_label + two form_input radio buttons with same field_name
-
-    📋 EXACT JSON STRUCTURE FOR YES/NO QUESTIONS:
-    When you see: "16 Do you intend to live outside the UK permanently?" with "No" and "Yes" options
-
-    Generate EXACTLY this structure:
-    {
-      "type": "form_label",
-      "content": "16 Do you intend to live outside the UK permanently?"
-    },
-    {
-      "type": "form_input",
-      "content": "No",
-      "metadata": {
-        "input_type": "radio",
-        "field_name": "live_outside_uk_permanently",
-        "field_value": "no"
-      }
-    },
-    {
-      "type": "form_input",
-      "content": "Yes",
-      "metadata": {
-        "input_type": "radio",
-        "field_name": "live_outside_uk_permanently",
-        "field_value": "yes"
-      }
-    }
-
-    💡 PERFECT EXAMPLES - ANALYZE THESE PATTERNS:
-
-    EXAMPLE 1: CORRECT Label + Input Pattern
-    Visual: "Name: ____________"
-    Analysis: "Name:" is descriptive text, "____" is fillable area
-    CORRECT Output:
-    - form_label: content="Name:", type="form_label"
-    - form_input: content="", type="form_input", input_type="text", field_name="name", placeholder="Enter your name", visual_cue="underline for text input"
-
-    EXAMPLE 1b: WRONG Pattern (DO NOT DO THIS)
-    Visual: Same as above
-    WRONG Output:
-    - form_label: content="Name:", type="form_label"
-    - form_input: content="Name", type="form_input", input_type="text", field_name="name"
-    - form_input: content="Name:", type="form_input", input_type="text", field_name="name_label"
-    ❌ WRONG! Don't create inputs for label text!
-
-    EXAMPLE 2: Checkbox
-    Visual: "☐ I agree to the terms and conditions"
-    Analysis: See □ square box → Checkbox
-    Output:
-    - form_input: content="I agree to the terms and conditions", type="form_input", input_type="checkbox", field_name="agree_terms", visual_cue="square checkbox box"
-
-    EXAMPLE 3: Radio Buttons
-    Visual: "Gender: ○ Male ○ Female ○ Other"
-    Analysis: See ○ circles → Radio buttons group
-    Output:
-    - form_label: content="Gender:", type="form_label"
-    - form_input: content="Male", type="form_input", input_type="radio", field_name="gender", field_value="male", visual_cue="circular radio button"
-    - form_input: content="Female", type="form_input", input_type="radio", field_name="gender", field_value="female", visual_cue="circular radio button"
-    - form_input: content="Other", type="form_input", input_type="radio", field_name="gender", field_value="other", visual_cue="circular radio button"
-
-    EXAMPLE 4: Dropdown
-    Visual: "Country: [Select Country ▼]"
-    Analysis: See ▼ dropdown arrow → Select field
-    Output:
-    - form_label: content="Country:", type="form_label"
-    - form_input: content="Country", type="form_input", input_type="select", field_name="country", options=["USA", "Canada", "UK", "Other"], visual_cue="dropdown with arrow indicator"
-
-    EXAMPLE 5: Email Field
-    Visual: "Email: someone@example.com"
-    Analysis: See @ symbol → Email input
-    Output:
-    - form_label: content="Email:", type="form_label"
-    - form_input: content="Email", type="form_input", input_type="email", field_name="email", field_value="someone@example.com", visual_cue="@ symbol indicates email"
-
-    EXAMPLE 6: Date Field (Government Form Style)
-    Visual: "Your date of leaving the UK DD MM YYYY [__] [__] [____]"
-    Analysis: See sequential boxes with date format → Date input
-    Output:
-    - form_label: content="Your date of leaving the UK", type="form_label"
-    - form_input: content="Date of leaving UK", type="form_input", input_type="date", field_name="leaving_date", visual_cue="sequential date boxes DD MM YYYY format"
-
-    EXAMPLE 7: Yes/No Radio Group (CORRECT Government Form Pattern)
-    Visual: "16 Do you intend to live outside the UK permanently?" followed by separate "No" section and "Yes" section
-    Analysis: This is ONE question with two radio button options in separate visual sections
-    Output:
-    - form_label: content="16 Do you intend to live outside the UK permanently?", type="form_label"
-    - form_input: content="No", type="form_input", input_type="radio", field_name="live_outside_uk_permanently", field_value="no", visual_cue="No option section"
-    - form_input: content="Yes", type="form_input", input_type="radio", field_name="live_outside_uk_permanently", field_value="yes", visual_cue="Yes option section"
-
-    EXAMPLE 9: CORRECT Government Form Question
-    Visual: "16 Do you intend to live outside the UK permanently?" (this is just text, no input area)
-    Analysis: This is a question label with no fillable area - LABEL ONLY
-    CORRECT Output:
-    - form_label: content="16 Do you intend to live outside the UK permanently?", type="form_label"
-    (No form_input because there's no fillable area for the question text itself)
-
-    EXAMPLE 10: WRONG Way - Creating Inputs for Labels (DO NOT DO THIS):
-    Visual: Same question text as above
-    WRONG Output:
-    - form_label: content="16 Do you intend to live outside the UK permanently?", type="form_label"
-    - form_input: content="Do you intend to live outside the UK permanently?", type="form_input", input_type="text"
-    ❌ WRONG! Question text is descriptive, not fillable - don't create inputs for it!
-
-    EXAMPLE 8: Multi-line Address Field
-    Visual: "Please tell us your full address in that country [large multi-line box with 'Postcode' at bottom]"
-    Analysis: Large text area with multiple lines → Textarea
-    Output:
-    - form_label: content="Please tell us your full address in that country", type="form_label"
-    - form_input: content="Full address", type="form_input", input_type="textarea", field_name="overseas_address", visual_cue="large multi-line address box"
-
-    🚨 ABSOLUTE REQUIREMENTS:
-    1. Every visual element that can be filled = form_input with correct input_type
-    2. Visual shapes determine input_type (□=checkbox, ○=radio, ▼=select)
-    3. Always include "visual_cue" in metadata to document what you saw
-    4. Group radio buttons with same field_name but different field_values
-    5. For selects, provide realistic options based on context
-    6. Labels are separate from inputs (except checkboxes where text is content)
-
-    🚨 CRITICAL: LABEL vs INPUT DISTINCTION
-
-    DECISION TREE - For EVERY piece of text, ask:
-    1. "Can a user FILL IN, TYPE IN, or SELECT this area?"
-       → YES = form_input
-       → NO = form_label (if it's descriptive text)
-
-    2. "Is this text describing what to enter?"
-       → YES = form_label only
-       → NO = Check if it's fillable
-
-    EXAMPLES OF LABELS ONLY (no inputs):
-    ✓ Question numbers and text: "16 Do you intend..."
-    ✓ Instructions: "Please complete..."
-    ✓ Headings: "About you", "Personal details"
-    ✓ Descriptive text: "For example British, Polish, French"
-
-    EXAMPLES OF INPUTS ONLY:
-    ✓ Empty boxes: □ (checkbox)
-    ✓ Underlines: _____ (text input)
-    ✓ Large empty areas (textarea)
-
-    NEVER CREATE BOTH: Don't create a label AND a text input for the same text!
-
-    🎯 SUCCESS CRITERIA FOR GOVERNMENT/OFFICIAL FORMS:
-    ✓ Every checkbox symbol → input_type="checkbox"
-    ✓ Every radio circle → input_type="radio"
-    ✓ Every dropdown arrow → input_type="select"
-    ✓ Every date pattern → input_type="date"
-    ✓ Every large box → input_type="textarea"
-    ✓ Every @ symbol → input_type="email"
-    ✓ Every phone pattern → input_type="tel"
-    ✓ Yes/No pairs → input_type="radio" with same field_name
-    ✓ DD/MM/YYYY or similar → input_type="date"
-    ✓ Address boxes → input_type="textarea"
-    ✓ Question numbers + boxes → appropriate input type based on visual cue
-    ✓ Multiple sequential boxes → likely date field
-    ✓ Single line boxes → input_type="text"
-
-    🚨 FINAL VALIDATION CHECKLIST:
-    Before submitting your JSON, ask yourself:
-    1. Did I create a form_input for every FILLABLE area I see?
-    2. Did I create a form_label for every QUESTION or INSTRUCTION text?
-    3. Did I avoid creating BOTH a label AND an input for the same descriptive text?
-    4. Are Yes/No options grouped as radio buttons with the same field_name?
-    5. Did I use the correct input_type based on VISUAL cues?
+    5. **Textarea**: Visual "Address: [large multi-line box]"
+       → {"type": "form_label", "content": "Address:"}
+       → {"type": "form_input", "content": "", "metadata": {"input_type": "textarea", "field_name": "address"}}
 
     ❌ COMMON MISTAKES TO AVOID:
-    - Creating "8 Your nationality" as both form_label AND form_input
-    - Making separate questions for "Yes" and "No" options
-    - Using input_type="text" for checkboxes or radio buttons
-    - Creating inputs for descriptive/instructional text
 
-    Return ONLY valid JSON. FOCUS ON VISUAL RECOGNITION FIRST!
+    - DON'T create form_input for question text - only for fillable areas
+    - DON'T use input_type="text" when you see □ or ○ - use checkbox/radio
+    - DON'T create separate questions for "Yes" and "No" - they're radio options
+    - DON'T miss sequential boxes [__][__][____] - these are date fields
+
+    Return ONLY valid JSON. Analyze VISUAL SHAPES first!
     """
 
     custom_instructions = Map.get(options, :custom_instructions, "")

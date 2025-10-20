@@ -11,6 +11,7 @@ defmodule Paperform2webWeb.Router do
     resources "/documents", DocumentController, only: [:index, :show, :delete, :update] do
       get "/status", DocumentController, :process_status
       get "/html", DocumentController, :html_output
+      get "/form-data", DocumentController, :form_data  # NEW: JSON endpoint for form data
       patch "/theme", DocumentController, :update_theme
       patch "/form_structure", DocumentController, :update_form_structure
       post "/reorder-fields", DocumentController, :reorder_fields

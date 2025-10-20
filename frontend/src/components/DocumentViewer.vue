@@ -1,7 +1,7 @@
 <template>
   <!-- Modal Overlay -->
   <div class="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
-    <div class="bg-white rounded-xl shadow-xl w-[80%] max-h-[90vh] flex flex-col">
+    <div class="bg-white rounded-xl shadow-xl w-[95%] max-h-[90vh] flex flex-col">
       <!-- Header -->
       <div class="flex items-center justify-between p-6 border-b border-gray-200">
         <div class="flex items-center space-x-3">
@@ -13,7 +13,7 @@
             <div class="flex items-center space-x-2 text-sm text-gray-500">
               <span>{{ formatDate(document.updated_at) }}</span>
               <span>•</span>
-              
+              <StatusBadge :status="document.status" />
             </div>
           </div>
         </div>
@@ -48,13 +48,102 @@
 
       <!-- Tab Content -->
       <div class="flex-1 overflow-y-auto bg-gradient-to-br from-gray-50 via-blue-50/30 to-gray-100">
+        <!-- Preview Tab -->
+        <div v-if="activeTab === 'preview' && document.status === 'completed'" class="p-8">
+          <div class="max-w-4xl mx-auto">
+            <!-- Mode Toggle -->
+            <div class="flex justify-end mb-4">
+              <div class="flex items-center gap-3">
+                <div class="flex bg-gray-100 rounded-lg p-1">
+                  <button
+                    @click="editMode = false"
+                    :class="[
+                      'px-3 py-1 rounded text-sm font-medium transition-colors',
+                      !editMode ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+                    ]"
+                  >
+                    Preview
+                  </button>
+                  <button
+                    @click="editMode = true"
+                    :class="[
+                      'px-3 py-1 rounded text-sm font-medium transition-colors',
+                      editMode ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+                    ]"
+                  >
+                    Edit
+                  </button>
+                </div>
+
+                <!-- Save/Discard buttons (always shown in edit mode) -->
+                <template v-if="editMode">
+                  <div class="border-l border-gray-300 h-6"></div>
+                  <button
+                    @click="saveFormChanges"
+                    :disabled="!hasChanges"
+                    :class="[
+                      'px-4 py-1.5 rounded text-sm font-medium transition-all shadow-sm',
+                      hasChanges
+                        ? 'bg-blue-600 text-white hover:bg-blue-700 cursor-pointer'
+                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    ]"
+                  >
+                    Save Changes
+                  </button>
+                  <button
+                    @click="discardChanges"
+                    :disabled="!hasChanges"
+                    :class="[
+                      'px-4 py-1.5 rounded text-sm font-medium border transition-colors',
+                      hasChanges
+                        ? 'border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer'
+                        : 'border-gray-200 text-gray-400 cursor-not-allowed'
+                    ]"
+                  >
+                    Discard
+                  </button>
+                </template>
+              </div>
+            </div>
+
+            <!-- Form Renderer -->
+            <div v-if="!loadingFormData" class="bg-white rounded-lg shadow-sm p-6">
+              <FormRenderer
+                v-if="formFields && formFields.length > 0"
+                :key="`form-${selectedTheme}-${editMode}`"
+                :fields="formFields"
+                :formTitle="document.filename || 'Form'"
+                :theme="selectedTheme"
+                :editMode="editMode"
+                @submit="handleFormSubmit"
+                @update:fields="handleFieldsUpdate"
+                @field-reorder="handleFieldReorder"
+                @field-update="handleFieldUpdate"
+                @save-fields="handleSaveFields"
+              />
+              <div v-else class="text-center py-12 text-gray-500">
+                <p>No form fields available</p>
+              </div>
+            </div>
+            <div v-else class="flex items-center justify-center py-12">
+              <div class="flex items-center space-x-3">
+                <svg class="animate-spin h-8 w-8 text-primary-600" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                <span class="text-gray-600">Loading form data...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Template Tab -->
         <div v-if="activeTab === 'template' && document.status === 'completed'" class="p-8">
           <div class="max-w-6xl mx-auto">
-
             <!-- Header Section -->
             <div class="text-center mb-8">
-Choose a template for your form:
+              <h3 class="text-lg font-semibold text-gray-900">Choose a template for your form</h3>
+              <p class="text-sm text-gray-600 mt-2">Click any template to preview it in a new tab</p>
             </div>
 
             <!-- Template Grid -->
@@ -65,8 +154,8 @@ Choose a template for your form:
                 @click="selectTemplate(template.value)"
                 :class="[
                   'relative p-4 rounded-2xl border-3 transition-all duration-300 hover:shadow-xl hover:scale-105',
-                  selectedTheme === template.value 
-                    ? 'border-primary-500 bg-primary-50 shadow-lg ring-4 ring-primary-200' 
+                  selectedTheme === template.value
+                    ? 'border-primary-500 bg-primary-50 shadow-lg ring-4 ring-primary-200'
                     : 'border-gray-200 bg-white hover:border-gray-300'
                 ]"
                 :disabled="isUpdatingTheme"
@@ -81,7 +170,7 @@ Choose a template for your form:
                     <div class="w-full h-3 rounded-md" :style="template.inputStyle"></div>
                   </div>
                 </div>
-                
+
                 <!-- Template Name & Selection -->
                 <div class="text-center">
                   <h3 class="text-sm font-semibold mb-1" :class="selectedTheme === template.value ? 'text-primary-700' : 'text-gray-700'">
@@ -94,59 +183,49 @@ Choose a template for your form:
                     <span class="font-medium">Selected</span>
                   </div>
                 </div>
-                
+
                 <!-- Loading Spinner -->
                 <div v-if="isUpdatingTheme && selectedTheme === template.value" class="absolute inset-0 bg-white/90 rounded-2xl flex items-center justify-center">
                   <div class="flex items-center space-x-2">
-                    <div class="w-5 h-5 border-2 border-primary-600 border-t-transparent rounded-full animate-spin"></div>
-                    <span class="text-sm font-medium text-primary-600">Applying...</span>
+                    <svg class="animate-spin h-5 w-5 text-primary-600" fill="none" viewBox="0 0 24 24">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                    <span class="text-sm text-gray-600">Applying...</span>
                   </div>
                 </div>
               </button>
             </div>
-
           </div>
         </div>
 
         <!-- Shares Tab -->
-        <div v-else-if="activeTab === 'shares'">
+        <div v-if="activeTab === 'shares' && document.status === 'completed'" class="p-8">
           <SharesList
-            :document-id="document.id"
-            @create-share="showShareDialog = true"
+            :documentId="document.id"
             @view-analytics="viewShareAnalytics"
           />
         </div>
 
         <!-- Analytics Tab -->
-        <div v-else-if="activeTab === 'analytics'">
-          <div v-if="selectedShareToken">
-            <ShareAnalytics :share-token="selectedShareToken" />
-          </div>
-          <div v-else class="flex items-center justify-center h-full">
-            <div class="text-center space-y-4">
-              <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
-                <span class="text-2xl text-gray-400">A</span>
-              </div>
-              <div>
-                <p class="text-gray-900 font-medium">No Analytics Selected</p>
-                <p class="text-sm text-gray-500 mt-1">Select a share from the Shares tab to view analytics</p>
-              </div>
-              <button
-                @click="activeTab = 'shares'"
-                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
-              >
-                Go to Shares
-              </button>
-            </div>
+        <div v-if="activeTab === 'analytics' && document.status === 'completed'" class="p-8">
+          <ShareAnalytics
+            v-if="selectedShareToken"
+            :shareToken="selectedShareToken"
+            @close="selectedShareToken = null"
+          />
+          <div v-else class="text-center py-12 text-gray-500">
+            <p>Select a share from the Shares tab to view analytics</p>
           </div>
         </div>
 
-        <!-- Processing State -->
-        <div v-else class="flex items-center justify-center h-full">
-          <div class="text-center space-y-4">
-            <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
-              <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        <!-- Processing Status -->
+        <div v-if="document.status !== 'completed'" class="flex items-center justify-center py-16">
+          <div class="flex items-center space-x-3">
+            <div class="flex items-center justify-center">
+              <svg class="animate-spin h-10 w-10 text-primary-600" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
               </svg>
             </div>
             <div>
@@ -161,20 +240,20 @@ Choose a template for your form:
       <div class="flex items-center justify-between p-6 border-t border-gray-200 bg-gray-50">
         <div class="flex items-center space-x-2">
           <button
-            @click="openHTMLInNewTab"
+            @click="openPreviewInNewTab"
             v-if="document.status === 'completed'"
             class="flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors bg-white text-gray-700 hover:bg-gray-100 border border-gray-300"
           >
             <EyeIcon class="w-4 h-4" />
-            <span>Preview</span>
+            <span>Open Preview</span>
           </button>
           <button
-            @click="openEditableHTMLInNewTab"
-            v-if="document.status === 'completed'"
-            class="flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors bg-white text-gray-700 hover:bg-gray-100 border border-gray-300"
+            @click="saveFormChanges"
+            v-if="document.status === 'completed' && editMode && hasChanges"
+            class="flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors bg-green-600 text-white hover:bg-green-700 shadow-sm"
           >
-            <PencilIcon class="w-4 h-4" />
-            <span>Edit</span>
+            <CheckIcon class="w-4 h-4" />
+            <span>Save Changes</span>
           </button>
           <button
             @click="showShareDialog = true"
@@ -206,12 +285,13 @@ Choose a template for your form:
 </template>
 
 <script>
-import { ref, watch } from 'vue'
-import { DocumentTextIcon, XMarkIcon, ShareIcon, EyeIcon, PencilIcon } from '@heroicons/vue/24/outline'
+import { ref, watch, onMounted } from 'vue'
+import { DocumentTextIcon, XMarkIcon, ShareIcon, EyeIcon, PencilIcon, CheckIcon } from '@heroicons/vue/24/outline'
 import StatusBadge from './StatusBadge.vue'
 import ShareDialog from './ShareDialog.vue'
 import SharesList from './SharesList.vue'
 import ShareAnalytics from './ShareAnalytics.vue'
+import FormRenderer from './FormRenderer.vue'
 import { documentsApi } from '../services/api.js'
 
 export default {
@@ -222,10 +302,12 @@ export default {
     ShareIcon,
     EyeIcon,
     PencilIcon,
+    CheckIcon,
     StatusBadge,
     ShareDialog,
     SharesList,
-    ShareAnalytics
+    ShareAnalytics,
+    FormRenderer
   },
   props: {
     document: {
@@ -233,20 +315,26 @@ export default {
       required: true
     }
   },
-  emits: ['close', 'document-updated'],
-  setup(props, { emit }) {
+  emits: ['close', 'document-updated', 'edit-mode-changed', 'changes-state-changed'],
+  setup(props, { emit, expose }) {
     const selectedTheme = ref(props.document.theme || 'default')
     const isUpdatingTheme = ref(false)
     const showShareDialog = ref(false)
-    const activeTab = ref('template')
+    const activeTab = ref('preview')
     const selectedShareToken = ref(null)
+    const editMode = ref(false)
+    const formFields = ref([])
+    const originalFormFields = ref([])
+    const loadingFormData = ref(false)
+    const hasChanges = ref(false)
+    const useNewRenderer = ref(true) // Toggle for new vs old rendering
 
     const tabs = ref([
+      { id: 'preview', name: 'Preview' },
       { id: 'template', name: 'Template' },
       { id: 'shares', name: 'Shares' },
       { id: 'analytics', name: 'Analytics' }
     ])
-
 
     const templateOptions = ref([
       {
@@ -298,117 +386,204 @@ export default {
         previewStyle: 'background: linear-gradient(45deg, #ff9a9e 0%, #fecfef 50%, #fecfef 100%);'
       },
       {
-        value: 'newspaper',
-        name: 'Newspaper',
-        headerStyle: 'background: #000; color: white;',
-        contentStyle: 'background: white; color: #000;',
-        inputStyle: 'background: transparent; border-bottom: 2px solid #000;',
-        previewStyle: 'background: #f5f5dc; border: 2px solid #000;'
+        value: 'professional',
+        name: 'Corporate',
+        headerStyle: 'background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);',
+        contentStyle: 'background: white; color: #2c3e50;',
+        inputStyle: 'background: #f7f9fc; border: 2px solid #e2e8f0; border-radius: 4px;',
+        previewStyle: 'background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);'
       },
       {
-        value: 'elegant',
-        name: 'Elegant',
-        headerStyle: 'background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%); color: #ecf0f1;',
-        contentStyle: 'background: white; color: #2c3e50;',
-        inputStyle: 'background: #fcfcfc; border: 1px solid #d5d8dc;',
-        previewStyle: 'background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);'
+        value: 'vibrant',
+        name: 'Vibrant',
+        headerStyle: 'background: linear-gradient(135deg, #ff6b6b 0%, #ff8e53 100%);',
+        contentStyle: 'background: linear-gradient(135deg, #fff5f5 0%, #fff0e6 100%); color: #2c3e50;',
+        inputStyle: 'background: white; border: 3px solid #ff6b6b; border-radius: 10px;',
+        previewStyle: 'background: linear-gradient(135deg, #ff6b6b 0%, #ff8e53 100%);'
       }
     ])
 
-    const getTemplateName = (themeValue) => {
-      const template = templateOptions.value.find(t => t.value === themeValue)
-      return template ? template.name : 'Professional'
+    // Load form data from the new JSON endpoint
+    const loadFormData = async () => {
+      if (props.document.status !== 'completed') return
+
+      loadingFormData.value = true
+      try {
+        const response = await documentsApi.getDocumentFormData(props.document.id)
+        formFields.value = response.data.data.form_fields || []
+        originalFormFields.value = JSON.parse(JSON.stringify(formFields.value))
+        hasChanges.value = false
+      } catch (error) {
+        console.error('Error loading form data:', error)
+        formFields.value = []
+      } finally {
+        loadingFormData.value = false
+      }
     }
 
-    const selectTemplate = async (themeValue) => {
-      if (themeValue === selectedTheme.value || isUpdatingTheme.value) return
-
-      selectedTheme.value = themeValue
-      await updateTheme()
-
-      // After theme is updated, redirect to edit mode
-      setTimeout(() => {
-        openEditableHTMLInNewTab()
-      }, 500)
+    // Handle form submission
+    const handleFormSubmit = (formData) => {
+      console.log('Form submitted:', formData)
+      // Here you can handle form submission, e.g., send to API
+      alert('Form submitted! Check console for data.')
     }
 
+    // Handle field updates
+    const handleFieldsUpdate = (updatedFields) => {
+      formFields.value = updatedFields
+      checkForChanges()
+    }
 
-    // Watch for document changes to update selected theme
-    watch(() => props.document, () => {
-      selectedTheme.value = props.document?.theme || 'default'
-    }, { immediate: true })
+    const handleFieldReorder = (reorderedFields) => {
+      formFields.value = reorderedFields
+      checkForChanges()
+    }
 
-    watch(() => props.document.theme, (newTheme) => {
-      selectedTheme.value = newTheme || 'default'
-    })
+    const handleFieldUpdate = (updatedField) => {
+      const index = formFields.value.findIndex(f => f.id === updatedField.id)
+      if (index !== -1) {
+        formFields.value[index] = updatedField
+        checkForChanges()
+      }
+    }
+
+    const handleSaveFields = async (updatedFields) => {
+      try {
+        // Update local state
+        formFields.value = updatedFields
+
+        // Save to backend
+        const response = await documentsApi.updateFormStructure(props.document.id, updatedFields)
+
+        // Update original fields to reflect saved state
+        originalFormFields.value = JSON.parse(JSON.stringify(updatedFields))
+        hasChanges.value = false
+
+        // Notify parent component
+        emit('document-updated', response.data.data)
+
+        alert('Changes saved successfully!')
+        console.log('Fields saved successfully')
+      } catch (error) {
+        console.error('Error saving fields:', error)
+        alert('Failed to save changes. Please try again.')
+      }
+    }
+
+    const checkForChanges = () => {
+      hasChanges.value = JSON.stringify(formFields.value) !== JSON.stringify(originalFormFields.value)
+    }
+
+    // Save form changes to backend
+    const saveFormChanges = async () => {
+      try {
+        const response = await documentsApi.updateFormStructure(props.document.id, formFields.value)
+        originalFormFields.value = JSON.parse(JSON.stringify(formFields.value))
+        hasChanges.value = false
+
+        // Notify parent to update document
+        emit('document-updated', response.data.data)
+
+        alert('Changes saved successfully!')
+
+        // Reload form data to ensure we have the latest from database
+        await loadFormData()
+      } catch (error) {
+        console.error('Error saving changes:', error)
+        alert('Failed to save changes')
+      }
+    }
+
+    // Discard changes and restore original state
+    const discardChanges = () => {
+      if (confirm('Are you sure you want to discard all unsaved changes?')) {
+        formFields.value = JSON.parse(JSON.stringify(originalFormFields.value))
+        hasChanges.value = false
+      }
+    }
+
+    const selectTemplate = async (templateValue) => {
+      if (isUpdatingTheme.value) return
+
+      selectedTheme.value = templateValue
+      isUpdatingTheme.value = true
+
+      try {
+        const response = await documentsApi.updateDocumentTheme(props.document.id, templateValue)
+        emit('document-updated', response.data.data)
+
+        // Open preview in new tab after theme is applied
+        setTimeout(() => {
+          isUpdatingTheme.value = false
+          openPreviewInNewTab()
+        }, 500)
+      } catch (error) {
+        console.error('Error updating theme:', error)
+        isUpdatingTheme.value = false
+      }
+    }
+
+    const openPreviewInNewTab = () => {
+      const previewUrl = `/preview/${props.document.id}`
+      window.open(previewUrl, '_blank')
+    }
 
     const formatDate = (timestamp) => {
-      if (!timestamp) return 'Unknown'
-
-      // Handle different timestamp formats
-      let date
-      if (typeof timestamp === 'string') {
-        // Convert Elixir/Phoenix datetime strings
-        date = new Date(timestamp.replace(' ', 'T'))
-      } else {
-        date = new Date(timestamp)
-      }
-
-      if (isNaN(date.getTime())) {
-        console.warn('Invalid timestamp:', timestamp)
-        return 'Invalid Date'
-      }
-
+      const date = new Date(timestamp)
       return date.toLocaleDateString('en-US', {
         year: 'numeric',
-        month: 'long',
+        month: 'short',
         day: 'numeric',
         hour: '2-digit',
         minute: '2-digit'
       })
     }
 
-    const downloadHTML = () => {
-      const link = document.createElement('a')
-      link.href = `/api/documents/${props.document.id}/html`
-      link.download = `${props.document.filename.replace(/\.[^/.]+$/, "")}.html`
-      link.click()
-    }
-
     const openHTMLInNewTab = () => {
-      window.open(`/api/documents/${props.document.id}/html`, '_blank')
+      const url = `/api/documents/${props.document.id}/html?editing=false&theme=${selectedTheme.value}`
+      window.open(url, '_blank')
     }
 
     const openEditableHTMLInNewTab = () => {
-      window.open(`/api/documents/${props.document.id}/html?editing=true`, '_blank')
+      const url = `/api/documents/${props.document.id}/html?editing=true&theme=${selectedTheme.value}`
+      window.open(url, '_blank')
     }
 
-    const updateTheme = async () => {
-      if (selectedTheme.value === props.document.theme) return
-      
-      isUpdatingTheme.value = true
-      
-      try {
-        const response = await documentsApi.updateDocumentTheme(props.document.id, selectedTheme.value)
-        emit('document-updated', response.data.data)
-      } catch (error) {
-        console.error('Failed to update theme:', error)
-        // Reset theme selector to original value on error
-        selectedTheme.value = props.document.theme || 'default'
-      } finally {
-        isUpdatingTheme.value = false
-      }
-    }
-
-    const onShareSent = (shareData) => {
-      console.log('Form shared successfully:', shareData)
+    const onShareSent = () => {
       showShareDialog.value = false
+      activeTab.value = 'shares'
     }
 
-    const viewShareAnalytics = (share) => {
-      selectedShareToken.value = share.share_token
+    const viewShareAnalytics = (token) => {
+      selectedShareToken.value = token
       activeTab.value = 'analytics'
     }
+
+    // Load form data when component mounts or document changes
+    onMounted(() => {
+      loadFormData()
+    })
+
+    watch(() => props.document, () => {
+      selectedTheme.value = props.document.theme || 'default'
+      loadFormData()
+    }, { deep: true })
+
+    // Watch for edit mode changes and emit to parent
+    watch(editMode, (newValue) => {
+      emit('edit-mode-changed', newValue)
+    })
+
+    // Watch for hasChanges changes and emit to parent
+    watch(hasChanges, (newValue) => {
+      emit('changes-state-changed', newValue)
+    })
+
+    // Expose methods to parent component
+    expose({
+      triggerSave: saveFormChanges,
+      triggerDiscard: discardChanges
+    })
 
     return {
       selectedTheme,
@@ -416,45 +591,50 @@ export default {
       showShareDialog,
       activeTab,
       selectedShareToken,
+      editMode,
+      formFields,
+      loadingFormData,
+      hasChanges,
+      useNewRenderer,
       tabs,
       templateOptions,
+      selectTemplate,
       formatDate,
-      downloadHTML,
       openHTMLInNewTab,
       openEditableHTMLInNewTab,
-      updateTheme,
-      getTemplateName,
-      selectTemplate,
+      openPreviewInNewTab,
       onShareSent,
-      viewShareAnalytics
+      viewShareAnalytics,
+      handleFormSubmit,
+      handleFieldsUpdate,
+      handleFieldReorder,
+      handleFieldUpdate,
+      handleSaveFields,
+      saveFormChanges,
+      discardChanges,
+      loadFormData
     }
   }
 }
 </script>
 
 <style scoped>
-/* Template selection animations */
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+/* Custom scrollbar for form preview */
+.form-preview-container::-webkit-scrollbar {
+  width: 8px;
 }
 
-.template-card-enter-active {
-  animation: fadeInUp 0.3s ease-out;
+.form-preview-container::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
 }
 
-/* Enhance hover effects for template cards */
-.template-card {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+.form-preview-container::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
 }
 
-.template-card:hover {
-  transform: translateY(-4px) scale(1.02);
+.form-preview-container::-webkit-scrollbar-thumb:hover {
+  background: #555;
 }
 </style>
