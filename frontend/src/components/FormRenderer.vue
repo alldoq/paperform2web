@@ -69,13 +69,28 @@
 
             <!-- Render all fields in the group -->
             <div v-for="field in element.fields" :key="field.id" class="grouped-field">
-              <component
-                :is="getFieldComponent(field)"
-                v-bind="field"
-                :modelValue="formData[getFieldKey(field)]"
-                :editMode="true"
-                @update:modelValue="updateFieldValue(getFieldKey(field), $event)"
-              />
+              <div class="grouped-field-content">
+                <component
+                  :is="getFieldComponent(field)"
+                  v-bind="field"
+                  :modelValue="formData[getFieldKey(field)]"
+                  :editMode="true"
+                  @update:modelValue="updateFieldValue(getFieldKey(field), $event)"
+                />
+                <!-- Edit/Delete buttons for individual fields in group -->
+                <div v-if="element.type === 'group'" class="grouped-field-actions">
+                  <button
+                    @click="editField(field)"
+                    class="edit-btn-small"
+                    title="Edit field"
+                  >✎</button>
+                  <button
+                    @click="removeField(field.id)"
+                    class="remove-btn-small"
+                    title="Delete field"
+                  >✕</button>
+                </div>
+              </div>
             </div>
           </div>
         </template>
@@ -183,19 +198,20 @@ const processedFields = computed(() => {
   const radioGroups = {}
 
   for (const field of editableFields.value) {
-    if (field.type === 'radio') {
-      if (!radioGroups[field.field_name]) {
-        radioGroups[field.field_name] = {
-          id: field.field_name,
+    if (field.type === 'radio' || field.input_type === 'radio') {
+      const fieldName = field.field_name || field.id
+      if (!radioGroups[fieldName]) {
+        radioGroups[fieldName] = {
+          id: fieldName,
           type: 'radio',
-          label: field.label,
-          field_name: field.field_name,
-          required: field.required,
+          label: '', // Question text is in separate label field
+          field_name: fieldName,
+          required: field.required || false,
           options: []
         }
-        grouped.push(radioGroups[field.field_name])
+        grouped.push(radioGroups[fieldName])
       }
-      radioGroups[field.field_name].options.push({
+      radioGroups[fieldName].options.push({
         value: field.value || field.label,
         label: field.label
       })
@@ -235,9 +251,9 @@ const updateGroupedFields = () => {
         radioGroups[fieldName] = {
           id: fieldName,
           type: 'radio',
-          label: field.label,
+          label: '', // Don't use option label as group label - question text is in separate field
           field_name: fieldName,
-          required: field.required,
+          required: field.required || false,
           options: [],
           _originalFields: []  // Keep track of original fields for ungrouping
         }
@@ -507,8 +523,8 @@ onMounted(() => {
 }
 
 .editable-field-wrapper {
-  background: white;
-  border: 1px solid #e5e7eb;
+  background: transparent;
+  border: 1px solid rgba(229, 231, 235, 0.3);
   border-radius: 8px;
   padding: 15px;
   margin-bottom: 15px;
@@ -536,10 +552,52 @@ onMounted(() => {
   margin-bottom: 0;
 }
 
+.grouped-field-content {
+  position: relative;
+}
+
+.grouped-field-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.grouped-field:hover .grouped-field-actions {
+  opacity: 1;
+}
+
+.edit-btn-small,
+.remove-btn-small {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(229, 231, 235, 0.8);
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.edit-btn-small:hover {
+  background-color: #3b82f6;
+  color: white;
+  border-color: #3b82f6;
+}
+
+.remove-btn-small:hover {
+  background-color: #ef4444;
+  color: white;
+  border-color: #ef4444;
+}
+
 .group-label {
   font-size: 9px;
-  color: #9ca3af;
-  background: #f9fafb;
+  color: inherit;
+  opacity: 0.6;
+  background: rgba(156, 163, 175, 0.2);
   padding: 1px 4px;
   border-radius: 2px;
   font-weight: 500;
@@ -555,9 +613,10 @@ onMounted(() => {
   gap: 8px;
   align-items: center;
   z-index: 10;
-  background: white;
+  background: rgba(255, 255, 255, 0.9);
   padding: 4px;
   border-radius: 6px;
+  backdrop-filter: blur(4px);
 }
 
 .field-drag-handle {
@@ -568,8 +627,8 @@ onMounted(() => {
 }
 
 .edit-btn, .remove-btn {
-  background: white;
-  border: 1px solid #e5e7eb;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(229, 231, 235, 0.5);
   border-radius: 4px;
   padding: 4px 8px;
   cursor: pointer;
@@ -601,7 +660,7 @@ onMounted(() => {
 .add-field-button:hover {
   border-color: #3b82f6;
   color: #3b82f6;
-  background-color: #eff6ff;
+  background-color: rgba(59, 130, 246, 0.1);
 }
 
 .edit-mode-actions {
@@ -783,6 +842,45 @@ onMounted(() => {
 
 .theme-dark :deep(.label-text) {
   color: #d1d5db;
+}
+
+/* Dark theme edit mode styles */
+.theme-dark .edit-container {
+  border-color: #4a4a4a;
+}
+
+.theme-dark .editable-field-wrapper {
+  border-color: rgba(74, 74, 74, 0.5);
+}
+
+.theme-dark .editable-field-wrapper:hover {
+  border-color: #4f46e5;
+}
+
+.theme-dark .field-controls {
+  background: rgba(45, 45, 45, 0.9);
+}
+
+.theme-dark .edit-btn,
+.theme-dark .remove-btn {
+  background: rgba(58, 58, 58, 0.8);
+  border-color: rgba(74, 74, 74, 0.5);
+  color: #e0e0e0;
+}
+
+.theme-dark .field-drag-handle {
+  color: #9ca3af;
+}
+
+.theme-dark .add-field-button {
+  color: #9ca3af;
+  border-color: #4a4a4a;
+}
+
+.theme-dark .add-field-button:hover {
+  border-color: #4f46e5;
+  color: #4f46e5;
+  background-color: rgba(79, 70, 229, 0.1);
 }
 
 /* Modern Theme - Purple gradient header */

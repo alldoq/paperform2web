@@ -54,36 +54,36 @@ const fieldStyle = computed(() => {
 h1.heading-field {
   font-size: 32px;
   font-weight: bold;
-  color: #111827;
+  color: inherit;
 }
 
 h2.heading-field {
   font-size: 24px;
   font-weight: 600;
-  color: #1f2937;
+  color: inherit;
 }
 
 h3.heading-field {
   font-size: 20px;
   font-weight: 600;
-  color: #374151;
+  color: inherit;
 }
 
 h4.heading-field {
   font-size: 18px;
   font-weight: 500;
-  color: #4b5563;
+  color: inherit;
 }
 
 h5.heading-field {
   font-size: 16px;
   font-weight: 500;
-  color: #6b7280;
+  color: inherit;
 }
 
 h6.heading-field {
   font-size: 14px;
   font-weight: 500;
-  color: #9ca3af;
+  color: inherit;
 }
 </style>

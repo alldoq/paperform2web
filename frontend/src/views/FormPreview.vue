@@ -1,21 +1,22 @@
 <template>
-  <div class="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-gray-100">
+  <div class="min-h-screen" :style="getThemeBackgroundStyle()">
     <!-- Header -->
-    <div class="bg-white shadow-sm border-b border-gray-200">
+    <div class="shadow-sm" :style="getHeaderStyle()">
       <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
         <div class="flex items-center justify-between">
           <div class="flex items-center space-x-3">
             <button
               @click="goBack"
-              class="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
+              class="p-2 rounded-lg transition-colors back-button"
+              :class="{ 'dark-header': isDarkHeader }"
             >
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
               </svg>
             </button>
             <div>
-              <h1 class="text-xl font-semibold text-gray-900">{{ documentTitle }}</h1>
-              <p class="text-sm text-gray-500">{{ themeName }} Theme</p>
+              <h1 class="text-xl font-semibold" :style="getHeaderTextStyle()">{{ documentTitle }}</h1>
+              <p class="text-sm" :style="getHeaderSubtextStyle()">{{ themeName }} Theme</p>
             </div>
           </div>
 
@@ -91,7 +92,7 @@
 
     <!-- Form Content -->
     <div v-else class="max-w-4xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
-      <div class="bg-white rounded-lg shadow-sm p-6">
+      <div class="rounded-lg shadow-sm p-6" :style="getFormContainerStyle()">
         <FormRenderer
           v-if="formFields && formFields.length > 0"
           :key="`form-${selectedTheme}-${editMode}`"
@@ -145,6 +146,10 @@ const themeName = computed(() => themeNames[selectedTheme.value] || 'Default')
 
 const hasChanges = computed(() => {
   return JSON.stringify(formFields.value) !== JSON.stringify(originalFormFields.value)
+})
+
+const isDarkHeader = computed(() => {
+  return ['dark', 'modern', 'classic', 'colorful', 'professional', 'vibrant'].includes(selectedTheme.value)
 })
 
 const loadFormData = async () => {
@@ -220,11 +225,79 @@ const discardChanges = () => {
   }
 }
 
+// Theme styling functions
+const getThemeBackgroundStyle = () => {
+  const themeBackgrounds = {
+    'default': 'background: linear-gradient(to bottom right, #f8f9fa, #e9ecef);',
+    'minimal': 'background: white;',
+    'dark': 'background: #1a1a1a;',
+    'modern': 'background: linear-gradient(to bottom right, #f7fafc, #edf2f7);',
+    'classic': 'background: linear-gradient(to bottom right, #fef5e7, #f8f9fa);',
+    'colorful': 'background: linear-gradient(to bottom right, #fff9e6, #ffe6f0);',
+    'professional': 'background: linear-gradient(to bottom right, #f0f4f8, #e2e8f0);',
+    'vibrant': 'background: linear-gradient(to bottom right, #fff5f5, #fff0e6);'
+  }
+  return themeBackgrounds[selectedTheme.value] || themeBackgrounds['default']
+}
+
+const getHeaderStyle = () => {
+  const headerStyles = {
+    'default': 'background: white; border-bottom: 1px solid #e5e7eb;',
+    'minimal': 'background: white; border-bottom: 1px solid #e5e7eb;',
+    'dark': 'background: #1e3a5f; border-bottom: 1px solid #2d4a6f;',
+    'modern': 'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-bottom: none;',
+    'classic': 'background: #8b4513; border-bottom: 3px double #a0522d;',
+    'colorful': 'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-bottom: none;',
+    'professional': 'background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); border-bottom: none;',
+    'vibrant': 'background: linear-gradient(135deg, #ff6b6b 0%, #ff8e53 100%); border-bottom: none;'
+  }
+  return headerStyles[selectedTheme.value] || headerStyles['default']
+}
+
+const getHeaderTextStyle = () => {
+  return isDarkHeader.value ? 'color: white;' : 'color: #111827;'
+}
+
+const getHeaderSubtextStyle = () => {
+  return isDarkHeader.value ? 'color: rgba(255, 255, 255, 0.8);' : 'color: #6b7280;'
+}
+
+const getFormContainerStyle = () => {
+  const themeContainers = {
+    'default': 'background: white;',
+    'minimal': 'background: white; border: 1px solid #e5e7eb;',
+    'dark': 'background: #2d2d2d;',
+    'modern': 'background: white;',
+    'classic': 'background: white;',
+    'colorful': 'background: linear-gradient(135deg, #fff9e6 0%, #f0f8ff 100%);',
+    'professional': 'background: white;',
+    'vibrant': 'background: linear-gradient(135deg, #fff5f5 0%, #fff0e6 100%);'
+  }
+  return themeContainers[selectedTheme.value] || themeContainers['default']
+}
+
 onMounted(() => {
   loadFormData()
 })
 </script>
 
 <style scoped>
-/* Additional custom styles if needed */
+/* Header button styles */
+.back-button {
+  color: #9ca3af;
+}
+
+.back-button:hover {
+  color: #4b5563;
+  background: #f3f4f6;
+}
+
+.back-button.dark-header {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.back-button.dark-header:hover {
+  color: white;
+  background: rgba(255, 255, 255, 0.1);
+}
 </style>

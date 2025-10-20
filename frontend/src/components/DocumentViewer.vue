@@ -47,20 +47,21 @@
       </div>
 
       <!-- Tab Content -->
-      <div class="flex-1 overflow-y-auto bg-gradient-to-br from-gray-50 via-blue-50/30 to-gray-100">
+      <div class="flex-1 overflow-y-auto" :style="getThemeBackgroundStyle()">
         <!-- Preview Tab -->
         <div v-if="activeTab === 'preview' && document.status === 'completed'" class="p-8">
           <div class="max-w-4xl mx-auto">
             <!-- Mode Toggle -->
             <div class="flex justify-end mb-4">
               <div class="flex items-center gap-3">
-                <div class="flex bg-gray-100 rounded-lg p-1">
+                <div class="flex rounded-lg p-1" :style="getModeToggleStyle()">
                   <button
                     @click="editMode = false"
                     :class="[
                       'px-3 py-1 rounded text-sm font-medium transition-colors',
-                      !editMode ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+                      !editMode ? 'shadow-sm' : 'hover:opacity-80'
                     ]"
+                    :style="getModeButtonStyle(!editMode)"
                   >
                     Preview
                   </button>
@@ -68,8 +69,9 @@
                     @click="editMode = true"
                     :class="[
                       'px-3 py-1 rounded text-sm font-medium transition-colors',
-                      editMode ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+                      editMode ? 'shadow-sm' : 'hover:opacity-80'
                     ]"
+                    :style="getModeButtonStyle(editMode)"
                   >
                     Edit
                   </button>
@@ -107,7 +109,7 @@
             </div>
 
             <!-- Form Renderer -->
-            <div v-if="!loadingFormData" class="bg-white rounded-lg shadow-sm p-6">
+            <div v-if="!loadingFormData" class="rounded-lg shadow-sm p-6" :style="getFormContainerStyle()">
               <FormRenderer
                 v-if="formFields && formFields.length > 0"
                 :key="`form-${selectedTheme}-${editMode}`"
@@ -154,10 +156,13 @@
                 @click="selectTemplate(template.value)"
                 :class="[
                   'relative p-4 rounded-2xl border-3 transition-all duration-300 hover:shadow-xl hover:scale-105',
-                  selectedTheme === template.value
-                    ? 'border-primary-500 bg-primary-50 shadow-lg ring-4 ring-primary-200'
-                    : 'border-gray-200 bg-white hover:border-gray-300'
+                  selectedTheme === template.value ? 'shadow-lg ring-4' : ''
                 ]"
+                :style="{
+                  borderColor: selectedTheme === template.value ? template.borderColor : '#e5e7eb',
+                  background: selectedTheme === template.value ? template.bgColor : '#ffffff',
+                  '--ring-color': template.borderColor + '33'
+                }"
                 :disabled="isUpdatingTheme"
               >
                 <!-- Template Preview -->
@@ -173,10 +178,10 @@
 
                 <!-- Template Name & Selection -->
                 <div class="text-center">
-                  <h3 class="text-sm font-semibold mb-1" :class="selectedTheme === template.value ? 'text-primary-700' : 'text-gray-700'">
+                  <h3 class="text-sm font-semibold mb-1" :style="{ color: template.textColor }">
                     {{ template.name }}
                   </h3>
-                  <div v-if="selectedTheme === template.value" class="flex items-center justify-center space-x-1 text-xs text-primary-600">
+                  <div v-if="selectedTheme === template.value" class="flex items-center justify-center space-x-1 text-xs" :style="{ color: template.textColor }">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                     </svg>
@@ -343,7 +348,10 @@ export default {
         headerStyle: 'background: #2c3e50;',
         contentStyle: 'background: #f4f4f4; color: #333;',
         inputStyle: 'background: #ddd;',
-        previewStyle: 'background: #f4f4f4;'
+        previewStyle: 'background: #f4f4f4;',
+        borderColor: '#2c3e50',
+        bgColor: '#f8f9fa',
+        textColor: '#2c3e50'
       },
       {
         value: 'minimal',
@@ -351,7 +359,10 @@ export default {
         headerStyle: 'background: #eee; color: #222; border-bottom: 2px solid #eee;',
         contentStyle: 'background: white; color: #222;',
         inputStyle: 'background: #f8f8f8; border-bottom: 1px solid #ccc;',
-        previewStyle: 'background: white;'
+        previewStyle: 'background: white;',
+        borderColor: '#e5e7eb',
+        bgColor: '#ffffff',
+        textColor: '#374151'
       },
       {
         value: 'dark',
@@ -359,7 +370,10 @@ export default {
         headerStyle: 'background: #1e3a5f;',
         contentStyle: 'background: #2d2d2d; color: #e0e0e0;',
         inputStyle: 'background: #3a3a3a;',
-        previewStyle: 'background: #1a1a1a;'
+        previewStyle: 'background: #1a1a1a;',
+        borderColor: '#1e3a5f',
+        bgColor: '#2d2d2d',
+        textColor: '#e0e0e0'
       },
       {
         value: 'modern',
@@ -367,7 +381,10 @@ export default {
         headerStyle: 'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);',
         contentStyle: 'background: white; color: #1f2937;',
         inputStyle: 'background: #f7fafc; border: 2px solid #e2e8f0; border-radius: 6px;',
-        previewStyle: 'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);'
+        previewStyle: 'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);',
+        borderColor: '#667eea',
+        bgColor: '#f7fafc',
+        textColor: '#667eea'
       },
       {
         value: 'classic',
@@ -375,7 +392,10 @@ export default {
         headerStyle: 'background: #8b4513; color: #f4e4c1;',
         contentStyle: 'background: white; color: #2c3e50;',
         inputStyle: 'background: #fefefe; border: 2px solid #8b4513;',
-        previewStyle: 'background: #f8f9fa; border: 3px double #8b4513;'
+        previewStyle: 'background: #f8f9fa; border: 3px double #8b4513;',
+        borderColor: '#8b4513',
+        bgColor: '#fef5e7',
+        textColor: '#8b4513'
       },
       {
         value: 'colorful',
@@ -383,7 +403,10 @@ export default {
         headerStyle: 'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);',
         contentStyle: 'background: linear-gradient(135deg, #fff9e6 0%, #f0f8ff 100%); color: #2c3e50;',
         inputStyle: 'background: linear-gradient(135deg, #fff 0%, #f8f9ff 100%); border: 3px solid #ff6b6b; border-radius: 8px;',
-        previewStyle: 'background: linear-gradient(45deg, #ff9a9e 0%, #fecfef 50%, #fecfef 100%);'
+        previewStyle: 'background: linear-gradient(45deg, #ff9a9e 0%, #fecfef 50%, #fecfef 100%);',
+        borderColor: '#ff6b6b',
+        bgColor: 'linear-gradient(135deg, #fff9e6 0%, #ffe6f0 100%)',
+        textColor: '#ff6b6b'
       },
       {
         value: 'professional',
@@ -391,7 +414,10 @@ export default {
         headerStyle: 'background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);',
         contentStyle: 'background: white; color: #2c3e50;',
         inputStyle: 'background: #f7f9fc; border: 2px solid #e2e8f0; border-radius: 4px;',
-        previewStyle: 'background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);'
+        previewStyle: 'background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);',
+        borderColor: '#1e3c72',
+        bgColor: '#f0f4f8',
+        textColor: '#1e3c72'
       },
       {
         value: 'vibrant',
@@ -399,7 +425,10 @@ export default {
         headerStyle: 'background: linear-gradient(135deg, #ff6b6b 0%, #ff8e53 100%);',
         contentStyle: 'background: linear-gradient(135deg, #fff5f5 0%, #fff0e6 100%); color: #2c3e50;',
         inputStyle: 'background: white; border: 3px solid #ff6b6b; border-radius: 10px;',
-        previewStyle: 'background: linear-gradient(135deg, #ff6b6b 0%, #ff8e53 100%);'
+        previewStyle: 'background: linear-gradient(135deg, #ff6b6b 0%, #ff8e53 100%);',
+        borderColor: '#ff6b6b',
+        bgColor: 'linear-gradient(135deg, #fff5f5 0%, #fff0e6 100%)',
+        textColor: '#ff6b6b'
       }
     ])
 
@@ -579,6 +608,80 @@ export default {
       emit('changes-state-changed', newValue)
     })
 
+    // Get theme-specific background style for the entire preview area
+    const getThemeBackgroundStyle = () => {
+      const themeBackgrounds = {
+        'default': 'background: linear-gradient(to bottom right, #f8f9fa, #e9ecef);',
+        'minimal': 'background: white;',
+        'dark': 'background: #1a1a1a;',
+        'modern': 'background: linear-gradient(to bottom right, #f7fafc, #edf2f7);',
+        'classic': 'background: linear-gradient(to bottom right, #fef5e7, #f8f9fa);',
+        'colorful': 'background: linear-gradient(to bottom right, #fff9e6, #ffe6f0);',
+        'professional': 'background: linear-gradient(to bottom right, #f0f4f8, #e2e8f0);',
+        'vibrant': 'background: linear-gradient(to bottom right, #fff5f5, #fff0e6);'
+      }
+      return themeBackgrounds[selectedTheme.value] || themeBackgrounds['default']
+    }
+
+    // Get theme-specific style for the form container
+    const getFormContainerStyle = () => {
+      const themeContainers = {
+        'default': 'background: white;',
+        'minimal': 'background: white; border: 1px solid #e5e7eb;',
+        'dark': 'background: #2d2d2d;',
+        'modern': 'background: white;',
+        'classic': 'background: white;',
+        'colorful': 'background: linear-gradient(135deg, #fff9e6 0%, #f0f8ff 100%);',
+        'professional': 'background: white;',
+        'vibrant': 'background: linear-gradient(135deg, #fff5f5 0%, #fff0e6 100%);'
+      }
+      return themeContainers[selectedTheme.value] || themeContainers['default']
+    }
+
+    // Get mode toggle container style based on theme
+    const getModeToggleStyle = () => {
+      const styles = {
+        'default': 'background: rgba(243, 244, 246, 0.8);',
+        'minimal': 'background: rgba(229, 231, 235, 0.5);',
+        'dark': 'background: rgba(58, 58, 58, 0.8);',
+        'modern': 'background: rgba(243, 244, 246, 0.8);',
+        'classic': 'background: rgba(249, 245, 231, 0.8);',
+        'colorful': 'background: rgba(255, 249, 230, 0.8);',
+        'professional': 'background: rgba(240, 244, 248, 0.8);',
+        'vibrant': 'background: rgba(255, 245, 245, 0.8);'
+      }
+      return styles[selectedTheme.value] || styles['default']
+    }
+
+    // Get mode button style based on theme and active state
+    const getModeButtonStyle = (isActive) => {
+      if (!isActive) {
+        const inactiveStyles = {
+          'default': 'background: transparent; color: #6b7280;',
+          'minimal': 'background: transparent; color: #9ca3af;',
+          'dark': 'background: transparent; color: #9ca3af;',
+          'modern': 'background: transparent; color: #6b7280;',
+          'classic': 'background: transparent; color: #8b7355;',
+          'colorful': 'background: transparent; color: #764ba2;',
+          'professional': 'background: transparent; color: #4a5568;',
+          'vibrant': 'background: transparent; color: #ff6b6b;'
+        }
+        return inactiveStyles[selectedTheme.value] || inactiveStyles['default']
+      }
+
+      const activeStyles = {
+        'default': 'background: white; color: #1f2937;',
+        'minimal': 'background: white; color: #111827;',
+        'dark': 'background: #3a3a3a; color: #e0e0e0;',
+        'modern': 'background: white; color: #667eea;',
+        'classic': 'background: white; color: #8b4513;',
+        'colorful': 'background: white; color: #764ba2;',
+        'professional': 'background: white; color: #1e3c72;',
+        'vibrant': 'background: white; color: #ff6b6b;'
+      }
+      return activeStyles[selectedTheme.value] || activeStyles['default']
+    }
+
     // Expose methods to parent component
     expose({
       triggerSave: saveFormChanges,
@@ -612,7 +715,11 @@ export default {
       handleSaveFields,
       saveFormChanges,
       discardChanges,
-      loadFormData
+      loadFormData,
+      getThemeBackgroundStyle,
+      getFormContainerStyle,
+      getModeToggleStyle,
+      getModeButtonStyle
     }
   }
 }
@@ -636,5 +743,10 @@ export default {
 
 .form-preview-container::-webkit-scrollbar-thumb:hover {
   background: #555;
+}
+
+/* Theme card ring with theme-specific colors */
+.ring-4 {
+  box-shadow: 0 0 0 4px var(--ring-color, rgba(59, 130, 246, 0.2));
 }
 </style>

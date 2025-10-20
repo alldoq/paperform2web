@@ -46,7 +46,7 @@ defineEmits(['update:modelValue'])
 
 .field-label {
   font-weight: 500;
-  color: #374151;
+  color: inherit;
   font-size: 14px;
 }
 

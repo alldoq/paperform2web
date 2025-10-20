@@ -51,7 +51,7 @@ const fieldStyle = computed(() => {
 
 .label-text {
   font-size: 14px;
-  color: #4b5563;
+  color: inherit;
   line-height: 1.6;
 }
 </style>
