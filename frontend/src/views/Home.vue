@@ -1,86 +1,14 @@
 <template>
   <div class="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-gray-100 font-sans">
     <!-- Header -->
-    <header class="bg-white/80 backdrop-blur-md border-b border-white/20 shadow-lg sticky top-0 z-10">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="flex justify-between items-center py-4">
-          <div class="flex items-center space-x-4">
-            <div class="w-10 h-10 bg-gradient-to-br from-primary-500 to-primary-700 rounded-lg flex items-center justify-center shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105">
-              <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-            </div>
-            <h1 class="text-2xl font-bold bg-gradient-to-r from-gray-800 via-gray-700 to-primary-600 bg-clip-text text-transparent">Paperform2Web</h1>
-          </div>
-
-          <nav class="flex items-center space-x-6">
-            <button
-              @click="currentPage = 'home'"
-              :class="[
-                'px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200',
-                currentPage === 'home'
-                  ? 'bg-primary-100 text-primary-700 border border-primary-200'
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-              ]"
-            >
-              Upload
-            </button>
-            <button
-              @click="currentPage = 'processed'"
-              :class="[
-                'px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200',
-                currentPage === 'processed'
-                  ? 'bg-primary-100 text-primary-700 border border-primary-200'
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-              ]"
-            >
-              Processed Documents
-            </button>
-
-            <!-- Save/Discard buttons -->
-            <template v-if="viewingDocument && isInEditMode">
-              <div class="border-l border-gray-300 h-6"></div>
-              <button
-                @click="handleSaveClick"
-                :disabled="!hasUnsavedChanges"
-                :class="[
-                  'px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200 shadow-sm',
-                  hasUnsavedChanges
-                    ? 'bg-blue-600 text-white hover:bg-blue-700 cursor-pointer'
-                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                ]"
-              >
-                Save Changes
-              </button>
-              <button
-                @click="handleDiscardClick"
-                :disabled="!hasUnsavedChanges"
-                :class="[
-                  'px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200 border',
-                  hasUnsavedChanges
-                    ? 'border-gray-300 text-gray-700 hover:bg-gray-100 cursor-pointer'
-                    : 'border-gray-200 text-gray-400 cursor-not-allowed'
-                ]"
-              >
-                Discard
-              </button>
-            </template>
-          </nav>
-          
-          <div class="flex items-center space-x-4">
-            <div class="flex items-center space-x-2 text-sm text-gray-600">
-              <span class="relative flex h-3 w-3">
-                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                <span class="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
-              </span>
-              <span>Status:</span>
-              <span class="font-semibold text-primary-700">Connected</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </header>
+    <AppHeader
+      :show-dashboard-nav="true"
+      :current-page="currentPage"
+      @page-change="currentPage = $event"
+    />
 
     <!-- Main Content -->
-    <main class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+    <main class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10 main-content">
       <!-- Upload Page -->
       <div v-if="currentPage === 'home'" class="space-y-8">
         <div class="card">
@@ -129,43 +57,35 @@
       </div>
     </main>
 
-    <!-- Document Viewer Modal -->
-    <DocumentViewer
-      v-if="viewingDocument"
-      ref="documentViewerRef"
-      :document="viewingDocument"
-      @close="closeViewer"
-      @document-updated="onDocumentUpdated"
-      @edit-mode-changed="onEditModeChanged"
-      @changes-state-changed="onChangesStateChanged"
-    />
+    <!-- Footer -->
+    <AppFooter />
   </div>
 </template>
 
 <script>
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import AppHeader from '../components/AppHeader.vue'
+import AppFooter from '../components/AppFooter.vue'
 import FileUpload from '../components/FileUpload.vue'
 import ProcessingStatus from '../components/ProcessingStatus.vue'
 import DocumentList from '../components/DocumentList.vue'
-import DocumentViewer from '../components/DocumentViewer.vue'
 import { documentsApi } from '../services/api.js'
 
 export default {
   name: 'App',
   components: {
+    AppHeader,
+    AppFooter,
     FileUpload,
     ProcessingStatus,
-    DocumentList,
-    DocumentViewer
+    DocumentList
   },
   setup() {
+    const router = useRouter()
     const processingDocuments = ref([])
     const completedDocuments = ref([])
-    const viewingDocument = ref(null)
     const currentPage = ref('home')
-    const isInEditMode = ref(false)
-    const hasUnsavedChanges = ref(false)
-    const documentViewerRef = ref(null)
 
     // Computed property to get the most recent processing document
     const currentProcessingDocument = computed(() => {
@@ -189,8 +109,8 @@ export default {
         // Remove from processing documents
         processingDocuments.value = processingDocuments.value.filter(doc => doc.id !== document.id)
 
-        // Automatically open document viewer for template selection
-        viewingDocument.value = document
+        // Automatically navigate to document viewer for template selection
+        router.push(`/documents/${document.id}`)
       } else if (document.status === 'failed') {
         // Update or add to processing documents with error status
         const existingIndex = processingDocuments.value.findIndex(doc => doc.id === document.id)
@@ -211,22 +131,7 @@ export default {
     }
 
     const viewDocument = (document) => {
-      viewingDocument.value = document
-    }
-
-    const closeViewer = () => {
-      viewingDocument.value = null
-    }
-
-    const onDocumentUpdated = (updatedDocument) => {
-      // Update the viewing document
-      viewingDocument.value = updatedDocument
-
-      // Update the document in the completed documents list
-      const index = completedDocuments.value.findIndex(doc => doc.id === updatedDocument.id)
-      if (index !== -1) {
-        completedDocuments.value[index] = updatedDocument
-      }
+      router.push(`/documents/${document.id}`)
     }
 
     const onDocumentDeleted = (deletedDocument) => {
@@ -235,11 +140,6 @@ export default {
 
       // Remove from processing documents list
       processingDocuments.value = processingDocuments.value.filter(doc => doc.id !== deletedDocument.id)
-
-      // Close viewer if the deleted document was being viewed
-      if (viewingDocument.value && viewingDocument.value.id === deletedDocument.id) {
-        viewingDocument.value = null
-      }
     }
 
     const loadDocuments = async () => {
@@ -263,30 +163,13 @@ export default {
         // Sort processing documents by insertion time (newest first)
         processingDocuments.value.sort((a, b) => new Date(b.inserted_at) - new Date(a.inserted_at))
 
+        // Sort completed documents by insertion time (newest first)
+        completedDocuments.value.sort((a, b) => new Date(b.inserted_at) - new Date(a.inserted_at))
+
         console.log(`Loaded ${processingDocuments.value.length} processing documents and ${completedDocuments.value.length} completed documents`)
       } catch (error) {
         console.error('Failed to load documents:', error)
       }
-    }
-
-    const handleSaveClick = () => {
-      if (documentViewerRef.value) {
-        documentViewerRef.value.triggerSave()
-      }
-    }
-
-    const handleDiscardClick = () => {
-      if (documentViewerRef.value) {
-        documentViewerRef.value.triggerDiscard()
-      }
-    }
-
-    const onEditModeChanged = (editMode) => {
-      isInEditMode.value = editMode
-    }
-
-    const onChangesStateChanged = (hasChanges) => {
-      hasUnsavedChanges.value = hasChanges
     }
 
     onMounted(() => {
@@ -297,22 +180,25 @@ export default {
       processingDocuments,
       currentProcessingDocument,
       completedDocuments,
-      viewingDocument,
       currentPage,
-      isInEditMode,
-      hasUnsavedChanges,
-      documentViewerRef,
       onUploadComplete,
       onStatusUpdate,
       viewDocument,
-      closeViewer,
-      onDocumentUpdated,
-      onDocumentDeleted,
-      handleSaveClick,
-      handleDiscardClick,
-      onEditModeChanged,
-      onChangesStateChanged
+      onDocumentDeleted
     }
   }
 }
 </script>
+
+<style scoped>
+.main-content {
+  min-height: calc(100vh - 300px);
+  padding-top: 112px;
+}
+
+@media (max-width: 768px) {
+  .main-content {
+    padding-top: 96px;
+  }
+}
+</style>

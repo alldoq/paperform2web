@@ -39,6 +39,7 @@ defmodule Paperform2web.MixProject do
       {:postgrex, ">= 0.0.0"},
       {:phoenix_live_dashboard, "~> 0.8.3"},
       {:swoosh, "~> 1.16"},
+      {:resend, "~> 0.4.0"},
       {:req, "~> 0.5"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
@@ -50,7 +51,8 @@ defmodule Paperform2web.MixProject do
       {:multipart, "~> 0.4"},
       {:temp, "~> 0.4"},
       {:porcelain, "~> 2.0"},
-      {:cors_plug, "~> 3.0"}
+      {:cors_plug, "~> 3.0"},
+      {:bcrypt_elixir, "~> 3.0"}
     ]
   end
 

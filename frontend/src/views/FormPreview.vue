@@ -21,6 +21,22 @@
           </div>
 
           <div class="flex items-center space-x-3">
+            <!-- Theme Selector -->
+            <select
+              v-model="selectedTheme"
+              @change="handleThemeChange"
+              class="px-3 py-2 text-sm font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
+            >
+              <option value="default">Professional Theme</option>
+              <option value="minimal">Minimal Theme</option>
+              <option value="dark">Dark Theme</option>
+              <option value="modern">Modern Theme</option>
+              <option value="classic">Classic Theme</option>
+              <option value="colorful">Colorful Theme</option>
+              <option value="professional">Corporate Theme</option>
+              <option value="vibrant">Vibrant Theme</option>
+            </select>
+
             <button
               @click="toggleEditMode"
               :class="[
@@ -100,6 +116,7 @@
           :formTitle="documentTitle"
           :theme="selectedTheme"
           :editMode="editMode"
+          :pageCount="pageCount"
           @submit="handleFormSubmit"
           @update:fields="handleFieldsUpdate"
           @field-reorder="handleFieldReorder"
@@ -130,6 +147,7 @@ const originalFormFields = ref([])
 const documentTitle = ref('')
 const selectedTheme = ref('default')
 const editMode = ref(false)
+const pageCount = ref(1)
 
 const themeNames = {
   default: 'Professional',
@@ -164,6 +182,7 @@ const loadFormData = async () => {
     originalFormFields.value = JSON.parse(JSON.stringify(formFields.value))
     documentTitle.value = data.title || data.filename || 'Form'
     selectedTheme.value = data.theme || 'default'
+    pageCount.value = data.metadata?.page_count || data.metadata?.total_pages || 1
   } catch (err) {
     console.error('Error loading form data:', err)
     error.value = 'Failed to load form data. Please try again.'
@@ -174,6 +193,17 @@ const loadFormData = async () => {
 
 const toggleEditMode = () => {
   editMode.value = !editMode.value
+}
+
+const handleThemeChange = async () => {
+  try {
+    // Update the theme on the server
+    await documentsApi.updateDocumentTheme(documentId, selectedTheme.value)
+    console.log('Theme updated to:', selectedTheme.value)
+  } catch (err) {
+    console.error('Error updating theme:', err)
+    alert('Failed to update theme')
+  }
 }
 
 const goBack = () => {

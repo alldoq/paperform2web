@@ -195,7 +195,8 @@ defmodule Paperform2web.Documents do
           "width" => field["width"] || "full"
         },
         "position" => field["position"] || %{"x" => 0, "y" => index * 50, "width" => 400, "height" => 30},
-        "form_field_id" => field_id
+        "form_field_id" => field_id,
+        "page_number" => field["page_number"] || 1
       }
 
       # Add type-specific metadata
@@ -303,20 +304,22 @@ defmodule Paperform2web.Documents do
       }
     )
 
-    # For PDF multipage documents, also update the first page's sections
+    # For PDF multipage documents, update each page with its sections
     final_processed_data = if updated_processed_data["document_type"] == "pdf_multipage" and
                              updated_processed_data["pages"] do
       pages = updated_processed_data["pages"]
-      updated_first_page = if length(pages) > 0 do
-        first_page = Enum.at(pages, 0)
-        Map.put(first_page, "content", %{"sections" => combined_sections})
-      end
 
-      updated_pages = if updated_first_page do
-        List.replace_at(pages, 0, updated_first_page)
-      else
-        pages
-      end
+      # Group combined_sections by page_number
+      sections_by_page = Enum.group_by(combined_sections, fn section ->
+        section["page_number"] || 1
+      end)
+
+      # Update each page with its corresponding sections
+      updated_pages = Enum.map(pages, fn page ->
+        page_num = page["page_number"]
+        page_sections = Map.get(sections_by_page, page_num, [])
+        Map.put(page, "content", %{"sections" => page_sections})
+      end)
 
       Map.put(updated_processed_data, "pages", updated_pages)
     else
@@ -390,16 +393,18 @@ defmodule Paperform2web.Documents do
     # Also update pages if they exist (for multi-page documents)
     final_processed_data = if Map.has_key?(updated_processed_data, "pages") do
       pages = updated_processed_data["pages"] || []
-      updated_first_page = if length(pages) > 0 do
-        first_page = Enum.at(pages, 0)
-        Map.put(first_page, "content", %{"sections" => combined_sections})
-      end
 
-      updated_pages = if updated_first_page do
-        [updated_first_page | Enum.drop(pages, 1)]
-      else
-        pages
-      end
+      # Group combined_sections by page_number
+      sections_by_page = Enum.group_by(combined_sections, fn section ->
+        section["page_number"] || 1
+      end)
+
+      # Update each page with its corresponding sections
+      updated_pages = Enum.map(pages, fn page ->
+        page_num = page["page_number"]
+        page_sections = Map.get(sections_by_page, page_num, [])
+        Map.put(page, "content", %{"sections" => page_sections})
+      end)
 
       Map.put(updated_processed_data, "pages", updated_pages)
     else
@@ -483,12 +488,45 @@ defmodule Paperform2web.Documents do
   def get_form_json_data(%Document{processed_data: processed_data, status: "completed"}) do
     sections = get_in(processed_data, ["content", "sections"]) || []
 
+    # Check if this is a multi-page document that needs page number migration
+    sections = if is_multipage_document_missing_page_numbers?(processed_data, sections) do
+      reconstruct_page_numbers_from_pages(processed_data)
+    else
+      sections
+    end
+
     # Transform sections into a cleaner format for frontend
     sections
     |> Enum.map(&transform_section_to_json/1)
     |> Enum.filter(&(&1 != nil))
   end
   def get_form_json_data(_document), do: []
+
+  # Check if this is a multi-page document where sections are missing page_number
+  defp is_multipage_document_missing_page_numbers?(processed_data, sections) do
+    pages = processed_data["pages"] || []
+    page_count = processed_data["page_count"] || 0
+
+    # If we have multiple pages but sections don't have page_number, we need to migrate
+    page_count > 1 and length(pages) > 1 and
+      Enum.any?(sections, fn section -> !Map.has_key?(section, "page_number") end)
+  end
+
+  # Reconstruct page numbers from the original pages structure
+  defp reconstruct_page_numbers_from_pages(processed_data) do
+    pages = processed_data["pages"] || []
+
+    # Extract sections from each page and assign page numbers
+    Enum.flat_map(pages, fn page ->
+      page_num = page["page_number"]
+      page_sections = get_in(page, ["content", "sections"]) || []
+
+      # Add page_number to each section
+      Enum.map(page_sections, fn section ->
+        Map.put(section, "page_number", page_num)
+      end)
+    end)
+  end
 
   # Transform backend section format to cleaner frontend format
   defp transform_section_to_json(section) do
@@ -498,7 +536,8 @@ defmodule Paperform2web.Documents do
       label: section["content"] || "",
       metadata: section["metadata"] || %{},
       position: section["position"] || %{"x" => 0, "y" => 0},
-      formatting: section["formatting"] || %{}
+      formatting: section["formatting"] || %{},
+      page_number: section["page_number"] || 1
     }
 
     # Add field-specific properties
@@ -837,6 +876,122 @@ defmodule Paperform2web.Documents do
           completed_responses: Enum.count(responses, & &1.is_completed)
         }}
     end
+  end
+
+  @doc """
+  Get all form responses for a document.
+  """
+  def list_document_responses(document_id) do
+    # Get the document to access form structure
+    document = Repo.get(Document, document_id)
+
+    if is_nil(document) do
+      {:error, :not_found}
+    else
+      # Get all shares for this document
+      share_ids = from(s in DocumentShare,
+        where: s.document_id == ^document_id,
+        select: s.id
+      )
+      |> Repo.all()
+
+      # Get all responses
+      responses = if Enum.empty?(share_ids) do
+        []
+      else
+        from(r in FormResponse,
+          where: r.document_share_id in ^share_ids,
+          order_by: [desc: r.inserted_at],
+          preload: [:document_share]
+        )
+        |> Repo.all()
+      end
+
+      {:ok, responses, document}
+    end
+  end
+
+  @doc """
+  Get aggregated analytics for all shares of a document.
+  """
+  def get_document_analytics(document_id) do
+    # Get all shares for this document
+    shares = from(s in DocumentShare,
+      where: s.document_id == ^document_id,
+      order_by: [desc: s.inserted_at]
+    )
+    |> Repo.all()
+
+    # Get all share IDs
+    share_ids = Enum.map(shares, & &1.id)
+
+    # Get all analytics records for all shares
+    analytics = if Enum.empty?(share_ids) do
+      []
+    else
+      from(a in ResponseAnalytics,
+        where: a.document_share_id in ^share_ids,
+        order_by: [asc: a.field_key]
+      )
+      |> Repo.all()
+    end
+
+    # Get all responses for all shares
+    responses = if Enum.empty?(share_ids) do
+      []
+    else
+      from(r in FormResponse,
+        where: r.document_share_id in ^share_ids,
+        order_by: [desc: r.inserted_at]
+      )
+      |> Repo.all()
+    end
+
+    # Aggregate analytics by field_key
+    aggregated_analytics = analytics
+    |> Enum.group_by(& &1.field_key)
+    |> Enum.map(fn {field_key, field_analytics} ->
+      # Use the first one for field metadata
+      first = List.first(field_analytics)
+
+      # Sum up response counts
+      total_response_count = Enum.sum(Enum.map(field_analytics, & &1.response_count))
+
+      # Find the most common response value
+      most_common = field_analytics
+      |> Enum.max_by(& &1.response_count, fn -> first end)
+
+      # Calculate completion rate
+      completion_rate = if length(responses) > 0 do
+        total_response_count / length(responses)
+      else
+        0.0
+      end
+
+      %{
+        field_key: field_key,
+        field_type: first.field_type,
+        field_label: first.field_label,
+        response_value: most_common.response_value,
+        response_count: total_response_count,
+        completion_rate: completion_rate
+      }
+    end)
+
+    # Calculate summary statistics
+    total_opens = Enum.sum(Enum.map(shares, & &1.total_opens))
+    total_responses = length(responses)
+    completed_responses = Enum.count(responses, & &1.is_completed)
+
+    {:ok, %{
+      shares: shares,
+      total_shares: length(shares),
+      total_opens: total_opens,
+      total_responses: total_responses,
+      completed_responses: completed_responses,
+      analytics: aggregated_analytics,
+      responses: responses
+    }}
   end
 
   ## Private Helper Functions

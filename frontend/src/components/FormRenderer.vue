@@ -27,8 +27,31 @@
         />
       </div>
 
+      <!-- Pagination Controls (Preview Mode) -->
+      <div v-if="totalPages > 1" class="pagination-controls">
+        <button
+          type="button"
+          @click="previousPage"
+          :disabled="currentPage === 1"
+          class="pagination-button"
+        >
+          ← Previous
+        </button>
+        <div class="page-indicator">
+          Page {{ currentPage }} of {{ totalPages }}
+        </div>
+        <button
+          type="button"
+          @click="nextPage"
+          :disabled="currentPage === totalPages"
+          class="pagination-button"
+        >
+          Next →
+        </button>
+      </div>
+
       <!-- Submit Button -->
-      <div class="form-actions" v-if="showSubmitButton">
+      <div class="form-actions" v-if="showSubmitButton && currentPage === totalPages">
         <button
           type="submit"
           class="submit-button"
@@ -100,12 +123,48 @@
       <button @click="showAddField = true" class="add-field-button">
         + Add Field
       </button>
+
+      <!-- Pagination Controls (Edit Mode) -->
+      <div v-if="totalPages > 1" class="pagination-controls edit-mode-pagination">
+        <button
+          type="button"
+          @click="previousPage"
+          :disabled="currentPage === 1"
+          class="pagination-button"
+        >
+          ← Previous Page
+        </button>
+        <div class="page-indicator">
+          <span>Editing Page {{ currentPage }} of {{ totalPages }}</span>
+          <div class="page-dots">
+            <button
+              v-for="page in totalPages"
+              :key="page"
+              @click="goToPage(page)"
+              class="page-dot"
+              :class="{ active: page === currentPage }"
+              :title="`Go to page ${page}`"
+            >
+              {{ page }}
+            </button>
+          </div>
+        </div>
+        <button
+          type="button"
+          @click="nextPage"
+          :disabled="currentPage === totalPages"
+          class="pagination-button"
+        >
+          Next Page →
+        </button>
+      </div>
     </div>
 
     <!-- Field Editor Modal -->
     <FieldEditorModal
       v-if="editingField"
       :field="editingField"
+      :theme="theme"
       @save="saveFieldChanges"
       @close="editingField = null"
     />
@@ -113,6 +172,7 @@
     <!-- Add Field Modal -->
     <AddFieldModal
       v-if="showAddField"
+      :theme="theme"
       @add="addNewField"
       @close="showAddField = false"
     />
@@ -165,6 +225,10 @@ const props = defineProps({
   initialData: {
     type: Object,
     default: () => ({})
+  },
+  pageCount: {
+    type: Number,
+    default: 1
   }
 })
 
@@ -179,6 +243,7 @@ const editingField = ref(null)
 const showAddField = ref(false)
 const errors = ref({})
 const groupedFieldsForEdit = ref([])
+const currentPage = ref(1)
 
 // Field component mapping
 const fieldComponents = {
@@ -192,12 +257,26 @@ const fieldComponents = {
 }
 
 // Computed
+const totalPages = computed(() => {
+  if (props.pageCount > 1) {
+    return props.pageCount
+  }
+  // Calculate from fields if not provided
+  const maxPage = Math.max(...editableFields.value.map(f => f.page_number || 1))
+  return maxPage > 1 ? maxPage : 1
+})
+
+const currentPageFields = computed(() => {
+  // Filter fields for current page
+  return editableFields.value.filter(f => (f.page_number || 1) === currentPage.value)
+})
+
 const processedFields = computed(() => {
-  // Group radio buttons by field_name
+  // Group radio buttons by field_name for current page only
   const grouped = []
   const radioGroups = {}
 
-  for (const field of editableFields.value) {
+  for (const field of currentPageFields.value) {
     if (field.type === 'radio' || field.input_type === 'radio') {
       const fieldName = field.field_name || field.id
       if (!radioGroups[fieldName]) {
@@ -240,11 +319,14 @@ const isFormValid = computed(() => {
 // Methods
 // Function to group labels with their immediately following input fields for edit mode
 const updateGroupedFields = () => {
+  // Filter fields for current page first
+  const fieldsForCurrentPage = editableFields.value.filter(f => (f.page_number || 1) === currentPage.value)
+
   // First, group radio buttons by field_name (same as processedFields)
   const radioGroups = {}
   const nonRadioFields = []
 
-  for (const field of editableFields.value) {
+  for (const field of fieldsForCurrentPage) {
     if (field.type === 'radio' || field.input_type === 'radio') {
       const fieldName = field.field_name || field.id
       if (!radioGroups[fieldName]) {
@@ -272,7 +354,7 @@ const updateGroupedFields = () => {
   const fieldsWithRadioGroups = []
   const processedRadioGroups = new Set()
 
-  for (const field of editableFields.value) {
+  for (const field of fieldsForCurrentPage) {
     if (field.type === 'radio' || field.input_type === 'radio') {
       const fieldName = field.field_name || field.id
       if (!processedRadioGroups.has(fieldName)) {
@@ -376,19 +458,47 @@ const handleFieldReorder = () => {
 }
 
 const handleGroupedFieldReorder = () => {
-  // Flatten the groups back to individual fields
-  const flattenedFields = []
+  // Flatten the groups back to individual fields for current page
+  const flattenedCurrentPageFields = []
   for (const group of groupedFieldsForEdit.value) {
     for (const field of group.fields) {
       // If this is a grouped radio field, expand it back to individual options
       if (field.type === 'radio' && field._originalFields) {
-        flattenedFields.push(...field._originalFields)
+        flattenedCurrentPageFields.push(...field._originalFields)
       } else {
-        flattenedFields.push(field)
+        flattenedCurrentPageFields.push(field)
       }
     }
   }
-  editableFields.value = flattenedFields
+
+  // Preserve fields from other pages, sorted by page number
+  const fieldsFromOtherPages = editableFields.value
+    .filter(f => (f.page_number || 1) !== currentPage.value)
+    .sort((a, b) => (a.page_number || 1) - (b.page_number || 1))
+
+  // Group all fields by page and reconstruct in order
+  const fieldsByPage = new Map()
+
+  // Add fields from other pages
+  fieldsFromOtherPages.forEach(field => {
+    const page = field.page_number || 1
+    if (!fieldsByPage.has(page)) {
+      fieldsByPage.set(page, [])
+    }
+    fieldsByPage.get(page).push(field)
+  })
+
+  // Add current page fields
+  fieldsByPage.set(currentPage.value, flattenedCurrentPageFields)
+
+  // Reconstruct fields array in page order
+  const allPages = Array.from(fieldsByPage.keys()).sort((a, b) => a - b)
+  const mergedFields = []
+  allPages.forEach(page => {
+    mergedFields.push(...fieldsByPage.get(page))
+  })
+
+  editableFields.value = mergedFields
   emit('update:fields', editableFields.value)
   emit('field-reorder', editableFields.value)
 }
@@ -417,11 +527,31 @@ const removeField = (fieldId) => {
 const addNewField = (field) => {
   const newField = {
     ...field,
-    id: 'field_' + Date.now()
+    id: 'field_' + Date.now(),
+    page_number: currentPage.value
   }
   editableFields.value.push(newField)
   emit('update:fields', editableFields.value)
   showAddField.value = false
+}
+
+// Pagination methods
+const nextPage = () => {
+  if (currentPage.value < totalPages.value) {
+    currentPage.value++
+  }
+}
+
+const previousPage = () => {
+  if (currentPage.value > 1) {
+    currentPage.value--
+  }
+}
+
+const goToPage = (pageNum) => {
+  if (pageNum >= 1 && pageNum <= totalPages.value) {
+    currentPage.value = pageNum
+  }
 }
 
 // Watch for prop changes
@@ -433,6 +563,11 @@ watch(() => props.fields, (newFields) => {
 watch(editableFields, () => {
   updateGroupedFields()
 }, { deep: true })
+
+// Watch for page changes to update groups
+watch(currentPage, () => {
+  updateGroupedFields()
+})
 
 // Initialize form data for all fields
 onMounted(() => {
@@ -1120,5 +1255,125 @@ onMounted(() => {
 
 .theme-vibrant :deep(.label-text) {
   color: #2c3e50;
+}
+
+/* Pagination Styles */
+.pagination-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 30px;
+  padding: 20px;
+  border-top: 2px solid #e5e7eb;
+  gap: 15px;
+}
+
+.edit-mode-pagination {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 2px solid #d1d5db;
+  background: rgba(249, 250, 251, 0.5);
+  border-radius: 8px;
+}
+
+.pagination-button {
+  padding: 10px 20px;
+  background-color: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-width: 120px;
+}
+
+.pagination-button:hover:not(:disabled) {
+  background-color: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.pagination-button:disabled {
+  background-color: #9ca3af;
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.page-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  color: #374151;
+  font-size: 16px;
+}
+
+.page-dots {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.page-dot {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 2px solid #d1d5db;
+  background: white;
+  color: #6b7280;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.page-dot:hover {
+  border-color: #3b82f6;
+  color: #3b82f6;
+  background: #eff6ff;
+}
+
+.page-dot.active {
+  background: #3b82f6;
+  color: white;
+  border-color: #3b82f6;
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+}
+
+/* Dark theme pagination */
+.theme-dark .pagination-controls {
+  border-top-color: #4a4a4a;
+}
+
+.theme-dark .edit-mode-pagination {
+  background: rgba(58, 58, 58, 0.5);
+  border-top-color: #4a4a4a;
+}
+
+.theme-dark .page-indicator {
+  color: #e0e0e0;
+}
+
+.theme-dark .page-dot {
+  background: #3a3a3a;
+  border-color: #4a4a4a;
+  color: #9ca3af;
+}
+
+.theme-dark .page-dot:hover {
+  border-color: #4f46e5;
+  color: #4f46e5;
+  background: rgba(79, 70, 229, 0.1);
+}
+
+.theme-dark .page-dot.active {
+  background: #4f46e5;
+  color: white;
+  border-color: #4f46e5;
 }
 </style>

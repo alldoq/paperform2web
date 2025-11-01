@@ -26,44 +26,51 @@ defmodule Paperform2web.Emails.ShareEmail do
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Form Invitation</title>
-        <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #f9fafb; }
-            .container { max-width: 600px; margin: 0 auto; background-color: white; }
-            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 2rem; text-align: center; }
-            .content { padding: 2rem; }
-            .button { display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: 600; margin: 1rem 0; }
-            .footer { background-color: #f3f4f6; padding: 1rem 2rem; text-align: center; color: #6b7280; font-size: 0.875rem; }
-            .expiry { background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; padding: 1rem; margin: 1rem 0; color: #92400e; }
-        </style>
     </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>Form invitation</h1>
-                <p>You've been invited to fill out a form</p>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #f9fafb;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: white;">
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 2rem; text-align: center;">
+                <h1 style="margin: 0; font-size: 28px;">Form invitation</h1>
+                <p style="margin: 0.5rem 0 0 0; font-size: 16px;">You've been invited to fill out a form</p>
             </div>
 
-            <div class="content">
-                <p>Hello#{if share.recipient_name, do: " #{share.recipient_name}", else: ""},</p>
+            <div style="padding: 2rem;">
+                <p style="color: #374151; font-size: 16px; line-height: 1.5;">Hello#{if share.recipient_name, do: " #{share.recipient_name}", else: ""},</p>
 
-                #{if share.message && share.message != "", do: "<p>#{String.replace(share.message, "\n", "<br>")}</p>", else: ""}
+                #{if share.message && share.message != "", do: "<p style=\"color: #374151; font-size: 16px; line-height: 1.5;\">#{String.replace(share.message, "\n", "<br>")}</p>", else: ""}
 
-                <p>You have been invited to fill out the form: <strong>#{document.filename}</strong></p>
+                <p style="color: #374151; font-size: 16px; line-height: 1.5;">You have been invited to fill out the form: <strong>#{document.filename}</strong></p>
 
-                <p>Click the button below to access the form:</p>
+                <p style="color: #374151; font-size: 16px; line-height: 1.5;">Click the button below to access the form:</p>
 
-                <p style="text-align: center;">
-                    <a href="#{share_url}" class="button">📝 Fill Out Form</a>
-                </p>
+                <table width="100%" cellpadding="0" cellspacing="0" style="margin: 24px 0;">
+                    <tr>
+                        <td align="center">
+                            <a href="#{share_url}"
+                               style="display: inline-block;
+                                      background-color: #3b82f6;
+                                      color: #ffffff !important;
+                                      padding: 16px 32px;
+                                      text-decoration: none;
+                                      border-radius: 8px;
+                                      font-weight: 600;
+                                      font-size: 16px;
+                                      border: 2px solid #3b82f6;
+                                      box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);">
+                                <span style="color: #ffffff !important;">📝 Fill Out Form</span>
+                            </a>
+                        </td>
+                    </tr>
+                </table>
 
-                #{if expiry_text != "", do: "<div class=\"expiry\">⏰ #{expiry_text}</div>", else: ""}
+                #{if expiry_text != "", do: "<div style=\"background-color: #fef3c7; border: 2px solid #f59e0b; border-radius: 6px; padding: 1rem; margin: 1rem 0; color: #92400e; font-size: 14px;\">⏰ #{expiry_text}</div>", else: ""}
 
-                <p>If the button doesn't work, you can copy and paste this link into your browser:</p>
-                <p style="word-break: break-all; color: #6b7280; font-size: 0.875rem;">#{share_url}</p>
+                <p style="color: #6b7280; font-size: 14px; line-height: 1.5;">If the button doesn't work, you can copy and paste this link into your browser:</p>
+                <p style="word-break: break-all; color: #6b7280; font-size: 12px; background-color: #f3f4f6; padding: 12px; border-radius: 4px; font-family: monospace;">#{share_url}</p>
             </div>
 
-            <div class="footer">
-                <p>This email was sent by Paperform2Web. If you believe you received this email in error, please ignore it.</p>
+            <div style="background-color: #f3f4f6; padding: 1rem 2rem; text-align: center; color: #6b7280; font-size: 14px;">
+                <p style="margin: 0;">This email was sent by Paperform2Web. If you believe you received this email in error, please ignore it.</p>
             </div>
         </div>
     </body>

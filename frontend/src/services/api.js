@@ -6,6 +6,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 120000, // 2 minutes for file uploads
+  withCredentials: true, // Always send cookies
   headers: {
     'Content-Type': 'application/json'
   }
@@ -141,14 +142,56 @@ export const documentsApi = {
   // Analytics
   getShareAnalytics: (token) => {
     return api.get(`/share/${token}/analytics`)
+  },
+
+  getDocumentAnalytics: (id) => {
+    return api.get(`/documents/${id}/analytics`)
+  },
+
+  // Responses
+  getDocumentResponses: (id) => {
+    return api.get(`/documents/${id}/responses`)
   }
 }
 
 // Auth API
 export const authApi = {
+  // Register a new user
+  register: (userData) => {
+    return api.post('/auth/register', userData)
+  },
+
+  // Login
+  login: (credentials) => {
+    return api.post('/auth/login', credentials, {
+      withCredentials: true // Important for cookies
+    })
+  },
+
+  // Logout
+  logout: () => {
+    return api.post('/auth/logout', {}, {
+      withCredentials: true
+    })
+  },
+
+  // Confirm email
+  confirmEmail: (token) => {
+    return api.get(`/auth/confirm/${token}`)
+  },
+
   // Check authentication status
   getAuthStatus: () => {
-    return api.get('/auth/status')
+    return api.get('/auth/status', {
+      withCredentials: true
+    })
+  },
+
+  // Get current user
+  getCurrentUser: () => {
+    return api.get('/auth/me', {
+      withCredentials: true
+    })
   },
 
   // Test connection to Ollama

@@ -62,15 +62,16 @@ config :phoenix, :stacktrace_depth, 20
 # Initialize plugs at runtime for faster development compilation
 config :phoenix, :plug_init_mode, :runtime
 
-# Disable swoosh api client as it is only required for production adapters.
-config :swoosh, :api_client, false
-
-# Configure Swoosh mailer for development
+# Configure Swoosh mailer for development with Resend
 config :paperform2web, Paperform2web.Mailer,
-  adapter: Swoosh.Adapters.Local
+  adapter: Resend.Swoosh.Adapter,
+  api_key: System.get_env("RESEND_API_KEY")
 
 # Configure base URL for email links
 config :paperform2web, :base_url, "http://localhost:4000"
+
+# Configure frontend URL for redirects
+config :paperform2web, :frontend_url, "http://localhost:3000"
 
 # Configure Ollama client
 config :paperform2web, :ollama_url, "https://openrouter.ai/api/v1"
@@ -80,7 +81,7 @@ config :paperform2web, :ollama_url, "https://openrouter.ai/api/v1"
 config :paperform2web, :ollama_auth, %{
   type: :api_key,
   # For API key auth:
-   api_key: "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",
+   api_key: "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",
 
   # For Bearer token auth:
   # token: "your-bearer-token",

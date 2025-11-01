@@ -59,7 +59,7 @@ defmodule Paperform2webWeb.DocumentController do
   end
 
   # NEW: JSON endpoint for form data
-  def form_data(conn, %{"document_id" => id}) do
+  def form_data(conn, %{"id" => id}) do
     document = Documents.get_document!(id)
 
     case document.status do
@@ -78,7 +78,8 @@ defmodule Paperform2webWeb.DocumentController do
             metadata: %{
               created_at: document.inserted_at,
               updated_at: document.updated_at,
-              total_pages: get_in(document.processed_data, ["metadata", "page_count"]) || 1
+              page_count: get_in(document.processed_data, ["page_count"]) || 1,
+              total_pages: get_in(document.processed_data, ["page_count"]) || 1
             }
           }
         })
@@ -347,6 +348,13 @@ defmodule Paperform2webWeb.DocumentController do
   end
 
   def view_shared_form(conn, %{"token" => token}) do
+    # Redirect to frontend page to display the form
+    frontend_url = Application.get_env(:paperform2web, :frontend_url, "http://localhost:3000")
+    redirect(conn, external: "#{frontend_url}/share/#{token}")
+  end
+
+  # API endpoint for fetching shared form data
+  def get_shared_form_data(conn, %{"token" => token}) do
     case Documents.get_document_share_by_token(token) do
       nil ->
         conn
@@ -465,6 +473,79 @@ defmodule Paperform2webWeb.DocumentController do
     end
   end
 
+  def view_document_analytics(conn, %{"document_id" => id}) do
+    case Documents.get_document_analytics(id) do
+      {:ok, analytics_data} ->
+        conn
+        |> json(%{
+          data: %{
+            total_shares: analytics_data.total_shares,
+            total_opens: analytics_data.total_opens,
+            total_responses: analytics_data.total_responses,
+            completed_responses: analytics_data.completed_responses,
+            completion_rate: if(analytics_data.total_responses > 0,
+              do: analytics_data.completed_responses / analytics_data.total_responses,
+              else: 0
+            ),
+            analytics: Enum.map(analytics_data.analytics, fn item ->
+              %{
+                field_key: item.field_key,
+                field_type: item.field_type,
+                field_label: item.field_label,
+                response_value: item.response_value,
+                response_count: item.response_count,
+                completion_rate: item.completion_rate
+              }
+            end),
+            shares: Enum.map(analytics_data.shares, fn share ->
+              %{
+                id: share.id,
+                recipient_email: share.recipient_email,
+                recipient_name: share.recipient_name,
+                total_opens: share.total_opens,
+                response_count: share.response_count,
+                is_completed: share.is_completed,
+                sent_at: share.sent_at
+              }
+            end)
+          }
+        })
+    end
+  end
+
+  def list_document_responses(conn, %{"document_id" => id}) do
+    case Documents.list_document_responses(id) do
+      {:ok, responses, document} ->
+        # Build field label map from response analytics
+        field_labels = build_field_label_map_from_analytics(id)
+
+        conn
+        |> json(%{
+          data: Enum.map(responses, fn response ->
+            # Enrich form_data with labels
+            enriched_data = enrich_response_data(response.form_data, field_labels)
+
+            %{
+              id: response.id,
+              session_id: response.session_id,
+              response_data: enriched_data,
+              is_completed: response.is_completed,
+              inserted_at: response.inserted_at,
+              share: %{
+                recipient_email: response.document_share.recipient_email,
+                recipient_name: response.document_share.recipient_name
+              }
+            }
+          end)
+        })
+
+      {:error, :not_found} ->
+        conn
+        |> put_status(:not_found)
+        |> json(%{error: "Document not found"})
+    end
+  end
+
   ## Private Helper Functions
 
   defp parse_expires_at(nil), do: nil
@@ -506,6 +587,81 @@ defmodule Paperform2webWeb.DocumentController do
       message: "Test submission received successfully"
     })
   end
+
+  defp build_field_label_map_from_analytics(document_id) do
+    require Logger
+    alias Paperform2web.Documents.Document
+    alias Paperform2web.Repo
+
+    # Get the document to access form structure from processed_data
+    document = Repo.get(Document, document_id)
+
+    if is_nil(document) || is_nil(document.processed_data) do
+      Logger.debug("No document or processed_data found for #{document_id}")
+      %{}
+    else
+      # Extract field labels from content sections
+      sections = get_in(document.processed_data, ["content", "sections"]) || []
+
+      # Build a map of field_name to label by pairing form_labels with form_inputs
+      label_map = sections
+      |> Enum.with_index()
+      |> Enum.reduce(%{}, fn {section, index}, acc ->
+        # Only process form_input sections that have field_name
+        if section["type"] == "form_input" && get_in(section, ["metadata", "field_name"]) do
+          field_name = get_in(section, ["metadata", "field_name"])
+          field_type = get_in(section, ["metadata", "input_type"]) || "text"
+
+          # Look backwards for the nearest form_label
+          label = find_previous_label(sections, index)
+
+          Map.put(acc, field_name, %{
+            label: label || humanize_field_name(field_name),
+            type: field_type
+          })
+        else
+          acc
+        end
+      end)
+
+      Logger.debug("Built field label map from document sections with #{map_size(label_map)} fields")
+      label_map
+    end
+  end
+
+  defp find_previous_label(sections, current_index) do
+    # Look backwards from current index to find the nearest form_label
+    sections
+    |> Enum.slice(0, current_index)
+    |> Enum.reverse()
+    |> Enum.find_value(fn section ->
+      if section["type"] == "form_label" && section["content"] do
+        section["content"]
+      end
+    end)
+  end
+
+  defp humanize_field_name(field_name) do
+    field_name
+    |> String.replace("_", " ")
+    |> String.split(" ")
+    |> Enum.map(&String.capitalize/1)
+    |> Enum.join(" ")
+  end
+
+  defp enrich_response_data(form_data, field_labels) when is_map(form_data) do
+    Enum.reduce(form_data, %{}, fn {field_name, value}, acc ->
+      field_info = Map.get(field_labels, field_name, %{label: field_name, type: "text"})
+
+      Map.put(acc, field_name, %{
+        label: field_info.label,
+        value: value,
+        type: field_info.type
+      })
+    end)
+  end
+
+  defp enrich_response_data(form_data, _field_labels), do: form_data
 
   defp changeset_errors_to_map(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->

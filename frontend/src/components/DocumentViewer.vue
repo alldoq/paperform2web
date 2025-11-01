@@ -1,9 +1,9 @@
 <template>
-  <!-- Modal Overlay -->
-  <div class="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
-    <div class="bg-white rounded-xl shadow-xl w-[95%] max-h-[90vh] flex flex-col">
+  <!-- Conditional wrapper: Modal or Page -->
+  <div :class="isPageMode ? 'document-viewer-page' : 'fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50'">
+    <div :class="isPageMode ? 'bg-white shadow-xl w-full min-h-screen flex flex-col' : 'bg-white rounded-xl shadow-xl w-[95%] max-h-[90vh] flex flex-col'">
       <!-- Header -->
-      <div class="flex items-center justify-between p-6 border-b border-gray-200">
+      <div class="flex items-center justify-between p-6 border-b border-gray-200 sticky top-0 bg-white z-10 shadow-sm">
         <div class="flex items-center space-x-3">
           <div class="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center">
             <DocumentTextIcon class="w-4 h-4 text-primary-600" />
@@ -18,13 +18,34 @@
           </div>
         </div>
 
-        <!-- Close Button -->
-        <button
-          @click="$emit('close')"
-          class="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
-        >
-          <XMarkIcon class="w-5 h-5" />
-        </button>
+        <!-- Action Buttons -->
+        <div class="flex items-center space-x-2">
+          <button
+            @click="openPreviewInNewTab"
+            v-if="document.status === 'completed'"
+            class="flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors bg-white text-gray-700 hover:bg-gray-100 border border-gray-300"
+          >
+            <EyeIcon class="w-4 h-4" />
+            <span>Open Preview</span>
+          </button>
+          <button
+            @click="showShareDialog = true"
+            v-if="document.status === 'completed'"
+            class="flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors bg-blue-600 text-white hover:bg-blue-700 shadow-sm"
+          >
+            <ShareIcon class="w-4 h-4" />
+            <span>Share</span>
+          </button>
+
+          <!-- Close Button (only in modal mode) -->
+          <button
+            v-if="!isPageMode"
+            @click="$emit('close')"
+            class="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
+          >
+            <XMarkIcon class="w-5 h-5" />
+          </button>
+        </div>
       </div>
 
       <!-- Tabs Navigation -->
@@ -208,7 +229,15 @@
         <div v-if="activeTab === 'shares' && document.status === 'completed'" class="p-8">
           <SharesList
             :documentId="document.id"
+            @create-share="showShareDialog = true"
             @view-analytics="viewShareAnalytics"
+          />
+        </div>
+
+        <!-- Responses Tab -->
+        <div v-if="activeTab === 'responses' && document.status === 'completed'" class="p-8">
+          <ResponsesList
+            :documentId="document.id"
           />
         </div>
 
@@ -219,9 +248,10 @@
             :shareToken="selectedShareToken"
             @close="selectedShareToken = null"
           />
-          <div v-else class="text-center py-12 text-gray-500">
-            <p>Select a share from the Shares tab to view analytics</p>
-          </div>
+          <DocumentAnalytics
+            v-else
+            :documentId="document.id"
+          />
         </div>
 
         <!-- Processing Status -->
@@ -241,42 +271,6 @@
         </div>
       </div>
 
-      <!-- Footer -->
-      <div class="flex items-center justify-between p-6 border-t border-gray-200 bg-gray-50">
-        <div class="flex items-center space-x-2">
-          <button
-            @click="openPreviewInNewTab"
-            v-if="document.status === 'completed'"
-            class="flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors bg-white text-gray-700 hover:bg-gray-100 border border-gray-300"
-          >
-            <EyeIcon class="w-4 h-4" />
-            <span>Open Preview</span>
-          </button>
-          <button
-            @click="saveFormChanges"
-            v-if="document.status === 'completed' && editMode && hasChanges"
-            class="flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors bg-green-600 text-white hover:bg-green-700 shadow-sm"
-          >
-            <CheckIcon class="w-4 h-4" />
-            <span>Save Changes</span>
-          </button>
-          <button
-            @click="showShareDialog = true"
-            v-if="document.status === 'completed'"
-            class="flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors bg-blue-600 text-white hover:bg-blue-700 shadow-sm"
-          >
-            <ShareIcon class="w-4 h-4" />
-            <span>Share</span>
-          </button>
-        </div>
-
-        <button
-          @click="$emit('close')"
-          class="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-gray-200 text-gray-800 hover:bg-gray-300"
-        >
-          Close
-        </button>
-      </div>
 
       <!-- Share Dialog -->
       <ShareDialog
@@ -296,6 +290,8 @@ import StatusBadge from './StatusBadge.vue'
 import ShareDialog from './ShareDialog.vue'
 import SharesList from './SharesList.vue'
 import ShareAnalytics from './ShareAnalytics.vue'
+import DocumentAnalytics from './DocumentAnalytics.vue'
+import ResponsesList from './ResponsesList.vue'
 import FormRenderer from './FormRenderer.vue'
 import { documentsApi } from '../services/api.js'
 
@@ -312,12 +308,18 @@ export default {
     ShareDialog,
     SharesList,
     ShareAnalytics,
+    DocumentAnalytics,
+    ResponsesList,
     FormRenderer
   },
   props: {
     document: {
       type: Object,
       required: true
+    },
+    isPageMode: {
+      type: Boolean,
+      default: false
     }
   },
   emits: ['close', 'document-updated', 'edit-mode-changed', 'changes-state-changed'],
@@ -338,6 +340,7 @@ export default {
       { id: 'preview', name: 'Preview' },
       { id: 'template', name: 'Template' },
       { id: 'shares', name: 'Shares' },
+      { id: 'responses', name: 'Responses' },
       { id: 'analytics', name: 'Analytics' }
     ])
 
@@ -583,8 +586,8 @@ export default {
       activeTab.value = 'shares'
     }
 
-    const viewShareAnalytics = (token) => {
-      selectedShareToken.value = token
+    const viewShareAnalytics = (share) => {
+      selectedShareToken.value = share.share_token
       activeTab.value = 'analytics'
     }
 
